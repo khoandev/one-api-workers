@@ -29,6 +29,7 @@ Provider 分发测试按行为拆分：
 - `tests/passthrough.test.ts`：各协议原样转发——URL 构造、鉴权替换、请求头白名单、请求体保真、`#` 精确端点、SSE 字节保真、用量采集
 - `tests/gemini-inbound.test.ts`：`/v1beta/models/*` 解析、`x-goog-api-key` / `?key=` 鉴权、转换到 chat/Claude/Responses 渠道、流式输出、Gemini 错误结构
 - `tests/chat-stream-usage.test.ts`：流式用量估算与权威用量
+- `tests/app-routing.test.ts`：以内存 SQLite 的 D1 shim 直接调用真实 Hono app——路由注册、数据库中间件、CORS 预检、`?key=` 作用范围、API 404，无需 workerd
 
 ## 本地 E2E
 

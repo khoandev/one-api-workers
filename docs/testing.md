@@ -29,6 +29,7 @@ Provider dispatch tests are split by behavior:
 - `tests/passthrough.test.ts`: raw forwarding for every protocol — URL construction, auth replacement, header allowlists, body fidelity, `#` exact endpoints, SSE byte preservation, usage capture
 - `tests/gemini-inbound.test.ts`: `/v1beta/models/*` parsing, `x-goog-api-key` / `?key=` authentication, conversion to chat/Claude/Responses channels, streaming, Gemini error shapes
 - `tests/chat-stream-usage.test.ts`: stream usage estimation and authoritative usage
+- `tests/app-routing.test.ts`: the real Hono app dispatched over an in-memory SQLite D1 shim — route registration, database middleware, CORS preflight, `?key=` scoping, and API 404s without workerd
 
 ## Local E2E
 
