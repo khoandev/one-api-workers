@@ -3,6 +3,7 @@ import { OpenAPIRoute } from "chanfana";
 import { z } from "zod";
 
 import { CommonErrorResponse, CommonSuccessfulResponse } from "../model";
+import { getSystemConfig } from "../system-config";
 import {
     AnalyticsQueryUpstreamError,
     AnalyticsQueryValidationError,
@@ -45,6 +46,50 @@ const toErrorResponse = (
     const message = error instanceof Error ? error.message : fallbackMessage;
     return c.text(message, toAnalyticsErrorStatus(error));
 };
+
+export class AnalyticsDashboardEndpoint extends OpenAPIRoute {
+    schema = {
+        tags: ["Admin API"],
+        summary: "Get the complete usage analytics dashboard payload",
+        request: {
+            query: z.object({
+                range: rangeSchema,
+            }),
+        },
+        responses: {
+            ...CommonSuccessfulResponse(z.any()),
+            ...CommonErrorResponse,
+        },
+    };
+
+    async handle(c: Context<HonoCustomType>) {
+        try {
+            const range = c.req.query("range");
+            const [overview, trend, token, channel, model, provider, systemConfig] = await Promise.all([
+                queryUsageOverview(c, range),
+                queryUsageTrend(c, range),
+                queryUsageBreakdown(c, range, "token"),
+                queryUsageBreakdown(c, range, "channel"),
+                queryUsageBreakdown(c, range, "model"),
+                queryUsageBreakdown(c, range, "provider"),
+                getSystemConfig(c),
+            ]);
+
+            return {
+                success: true,
+                data: {
+                    range: overview.range,
+                    displayDecimals: systemConfig.displayDecimals,
+                    overview,
+                    trend,
+                    breakdowns: { token, channel, model, provider },
+                },
+            } as CommonResponse;
+        } catch (error) {
+            return toErrorResponse(c, error, "Failed to query analytics dashboard");
+        }
+    }
+}
 
 export class AnalyticsOverviewEndpoint extends OpenAPIRoute {
     schema = {

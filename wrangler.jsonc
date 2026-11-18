@@ -23,7 +23,7 @@
     "directory": "./public",
     "not_found_handling": "single-page-application",
     "binding": "ASSETS",
-    "run_worker_first": true
+    "run_worker_first": ["/api", "/api/*", "/v1", "/v1/*", "/v1beta", "/v1beta/*"]
   },
   "d1_databases": [
     {

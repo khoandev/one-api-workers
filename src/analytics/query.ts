@@ -1,6 +1,7 @@
 import { Context } from "hono";
 
 import { BILLING_RAW_SCALE, LEGACY_TO_RAW_FACTOR } from "../billing";
+import { cachedValue } from "../cache";
 import { DEFAULT_USAGE_ANALYTICS_DATASET_NAME } from "./usage-logger";
 import { t } from "../i18n";
 
@@ -220,11 +221,7 @@ const USAGE_LOG_NUMERIC_COLUMNS = [
     DOUBLE_FIELDS.cacheCost,
 ];
 
-const DATASET_COLUMN_SUPPORT_CACHE_TTL_MS = 60_000;
-const DATASET_COLUMN_SUPPORT_CACHE = new Map<string, {
-    expiresAt: number;
-    promise: Promise<DatasetColumnSupport>;
-}>();
+const DATASET_COLUMN_SUPPORT_CACHE_TTL_MS = 5 * 60_000;
 
 const sanitizeDatasetName = (value?: string): string => {
     if (value && /^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
@@ -505,52 +502,39 @@ const runAnalyticsQuery = async <T extends Record<string, unknown>>(
     return result.data;
 };
 
-const getDatasetColumnSupport = async (
+// The probe uses no time window on purpose: an empty window must never pin an
+// incomplete column set for the whole cache TTL.
+const getDatasetColumnSupport = (
     c: Context<HonoCustomType>,
-    dataset: string,
-    whereClause?: string
+    dataset: string
 ): Promise<DatasetColumnSupport> => {
-    const cacheKey = `${c.env.CF_ACCOUNT_ID || "unknown"}:${dataset}:${whereClause || "__all__"}`;
-    const cached = DATASET_COLUMN_SUPPORT_CACHE.get(cacheKey);
-    if (cached && cached.expiresAt > Date.now()) {
-        return cached.promise;
-    }
+    return cachedValue(
+        c.env.DB,
+        `analytics:columns:${dataset}`,
+        DATASET_COLUMN_SUPPORT_CACHE_TTL_MS,
+        async () => {
+            const availableColumns = new Set<string>();
 
-    const pending = (async () => {
-        const availableColumns = new Set<string>();
-
-        const result = await runAnalyticsQueryRaw<Record<string, unknown>>(c, `
+            const result = await runAnalyticsQueryRaw<Record<string, unknown>>(c, `
 SELECT
     *
 FROM ${dataset}
-${whereClause ? `WHERE ${whereClause}` : ""}
 LIMIT 1
-        `.trim());
+            `.trim());
 
-        result.meta?.forEach((column) => {
-            if (column.name) {
-                availableColumns.add(column.name);
-            }
-        });
+            result.meta?.forEach((column) => {
+                if (column.name) {
+                    availableColumns.add(column.name);
+                }
+            });
 
-        result.data.forEach((row) => {
-            Object.keys(row).forEach((columnName) => availableColumns.add(columnName));
-        });
+            result.data.forEach((row) => {
+                Object.keys(row).forEach((columnName) => availableColumns.add(columnName));
+            });
 
-        return { availableColumns };
-    })();
-
-    DATASET_COLUMN_SUPPORT_CACHE.set(cacheKey, {
-        expiresAt: Date.now() + DATASET_COLUMN_SUPPORT_CACHE_TTL_MS,
-        promise: pending,
-    });
-
-    try {
-        return await pending;
-    } catch (error) {
-        DATASET_COLUMN_SUPPORT_CACHE.delete(cacheKey);
-        throw error;
-    }
+            return { availableColumns };
+        }
+    );
 };
 
 const isColumnAvailable = (support: DatasetColumnSupport, columnName: string): boolean => {
@@ -720,7 +704,7 @@ export const queryUsageOverview = async (
     }
 
     const dataset = getDatasetName(c);
-    const columnSupport = await getDatasetColumnSupport(c, dataset, buildRangeWhereClause(config));
+    const columnSupport = await getDatasetColumnSupport(c, dataset);
     const normalizedTotalCostExpression = buildNormalizedCostExpression(columnSupport, DOUBLE_FIELDS.totalCost);
     const rows = await runAnalyticsQuery<Record<string, unknown>>(c, `
 SELECT
@@ -766,7 +750,7 @@ export const queryUsageTrend = async (
 
     const dataset = getDatasetName(c);
     const trendWindow = buildTrendWindow(range, config);
-    const columnSupport = await getDatasetColumnSupport(c, dataset, trendWindow.whereClause);
+    const columnSupport = await getDatasetColumnSupport(c, dataset);
     const normalizedTotalCostExpression = buildNormalizedCostExpression(columnSupport, DOUBLE_FIELDS.totalCost);
     const rows = await runAnalyticsQuery<Record<string, unknown>>(c, `
 SELECT
@@ -820,7 +804,7 @@ export const queryUsageBreakdown = async (
 
     const dataset = getDatasetName(c);
     const dimensionField = BREAKDOWN_FIELDS[dimension];
-    const columnSupport = await getDatasetColumnSupport(c, dataset, buildRangeWhereClause(config));
+    const columnSupport = await getDatasetColumnSupport(c, dataset);
     const normalizedTotalCostExpression = buildNormalizedCostExpression(columnSupport, DOUBLE_FIELDS.totalCost);
     const rows = await runAnalyticsQuery<Record<string, unknown>>(c, `
 SELECT
@@ -893,7 +877,7 @@ WHERE ${buildRangeWhereClause(config)}
         };
     }
 
-    const columnSupport = await getDatasetColumnSupport(c, dataset, buildRangeWhereClause(config));
+    const columnSupport = await getDatasetColumnSupport(c, dataset);
     const compatibilityWarning = getUsageLogCompatibilityWarning(columnSupport, lang);
     const normalizedTotalCostExpression = buildNormalizedCostExpression(columnSupport, DOUBLE_FIELDS.totalCost);
     const normalizedCacheCostExpression = buildNormalizedCostExpression(columnSupport, DOUBLE_FIELDS.cacheCost);
@@ -1015,7 +999,7 @@ WHERE ${timeWindow.whereClause}
         );
     }
 
-    const columnSupport = await getDatasetColumnSupport(c, dataset, timeWindow.whereClause);
+    const columnSupport = await getDatasetColumnSupport(c, dataset);
     const compatibilityWarning = getUsageLogCompatibilityWarning(columnSupport, lang);
 
     if (!hasAnyLegacyLogSchema(columnSupport)) {
@@ -1059,13 +1043,18 @@ WHERE ${timeWindow.whereClause}
     }
 
     const whereClause = clauses.join("\n    AND ");
-    const countRows = await runAnalyticsQuery<Record<string, unknown>>(c, `
+    const hasFilters = Boolean(keyword) || result !== "all";
+    let total = baseTotal;
+
+    if (hasFilters) {
+        const countRows = await runAnalyticsQuery<Record<string, unknown>>(c, `
 SELECT
     count() AS total
 FROM ${dataset}
 WHERE ${whereClause}
     `.trim());
-    const total = toNumber(countRows[0]?.total);
+        total = toNumber(countRows[0]?.total);
+    }
     const totalPages = total > 0 ? Math.ceil(total / USAGE_LOG_PAGE_SIZE) : 0;
     const page = totalPages > 0 ? Math.min(requestedPage, totalPages) : 1;
     const offset = (page - 1) * USAGE_LOG_PAGE_SIZE;

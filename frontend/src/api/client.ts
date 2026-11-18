@@ -2,11 +2,7 @@ import {
   ApiResponse,
   AudioTestResponse,
   TestResponse,
-  AnalyticsOverviewData,
-  AnalyticsTrendData,
-  AnalyticsBreakdownData,
-  AnalyticsEventsData,
-  AnalyticsBreakdownDimension,
+  AnalyticsDashboardData,
   AnalyticsRange,
   BillingConfig,
   PricingSyncPreview,
@@ -275,21 +271,9 @@ export const apiClient = {
     }),
 
   // Analytics APIs
-  getAnalyticsOverview: (range: AnalyticsRange) =>
-    request<ApiResponse<AnalyticsOverviewData>>(`/api/admin/analytics/overview?range=${encodeURIComponent(range)}`, { method: 'GET' }),
-
-  getAnalyticsTrend: (range: AnalyticsRange) =>
-    request<ApiResponse<AnalyticsTrendData>>(`/api/admin/analytics/trend?range=${encodeURIComponent(range)}`, { method: 'GET' }),
-
-  getAnalyticsBreakdown: (range: AnalyticsRange, dimension: AnalyticsBreakdownDimension) =>
-    request<ApiResponse<AnalyticsBreakdownData>>(
-      `/api/admin/analytics/breakdown?range=${encodeURIComponent(range)}&dimension=${encodeURIComponent(dimension)}`,
-      { method: 'GET' }
-    ),
-
-  getAnalyticsEvents: (range: AnalyticsRange, limit = 40) =>
-    request<ApiResponse<AnalyticsEventsData>>(
-      `/api/admin/analytics/events?range=${encodeURIComponent(range)}&limit=${encodeURIComponent(String(limit))}`,
+  getAnalyticsDashboard: (range: AnalyticsRange) =>
+    request<ApiResponse<AnalyticsDashboardData>>(
+      `/api/admin/analytics/dashboard?range=${encodeURIComponent(range)}`,
       { method: 'GET' }
     ),
 
@@ -390,7 +374,7 @@ export const apiClient = {
   },
 
   // Auth check
-  checkAuth: () => request<ApiResponse>('/api/admin/channel', { method: 'GET' }),
+  checkAuth: () => request<ApiResponse<{ authenticated: boolean }>>('/api/admin/auth/session', { method: 'GET' }),
 
   startAdminLogin: (token: string) =>
     request<ApiResponse<AdminLoginResponse>>('/api/admin/auth/login', {

@@ -267,6 +267,16 @@ const migrateApiTokenUsagePrecision = async (c: Context<HonoCustomType>) => {
     }
 };
 
+const readDbVersion = async (c: Context<HonoCustomType>): Promise<string | null> => {
+    try {
+        return await c.env.DB.prepare(
+            `SELECT value FROM settings WHERE key = ?`
+        ).bind(CONSTANTS.DB_VERSION_KEY).first<string>("value");
+    } catch {
+        return null;
+    }
+};
+
 const dbOperations = {
     initialize: async (c: Context<HonoCustomType>) => {
         await initializeSchema(c);
@@ -312,7 +322,11 @@ const dbOperations = {
     ensureReady: async (c: Context<HonoCustomType>) => {
         if (!dbReadyPromise) {
             dbReadyPromise = (async () => {
-                await dbOperations.migrate(c);
+                // DB_VERSION guards this fast path: bump CONSTANTS.DB_VERSION whenever DB_INIT_QUERIES changes.
+                const version = await readDbVersion(c);
+                if (version !== CONSTANTS.DB_VERSION) {
+                    await dbOperations.migrate(c);
+                }
             })().catch((error) => {
                 dbReadyPromise = null;
                 throw error;

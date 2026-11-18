@@ -7,7 +7,8 @@ const ADMIN_SESSION_TTL_WITH_TELEGRAM_MS = 30 * 24 * 60 * 60 * 1000;
 const ADMIN_LOGIN_CHALLENGE_TTL_MS = 5 * 60 * 1000;
 const ADMIN_LOGIN_CHALLENGE_MAX_ATTEMPTS = 5;
 const ADMIN_RATE_LIMIT_RETENTION_MS = 24 * 60 * 60 * 1000;
-const ARTIFACT_CLEANUP_INTERVAL_MS = 60_000;
+const ADMIN_SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000;
+const ARTIFACT_CLEANUP_INTERVAL_MS = 15 * 60_000;
 let lastArtifactCleanupAt = 0;
 const DEFAULT_SYSTEM_TIMEZONE = "Asia/Shanghai";
 const LOCAL_DEV_HOSTNAMES = new Set(["0.0.0.0", "127.0.0.1", "::1", "localhost"]);
@@ -423,6 +424,24 @@ export const invalidateAdminSession = async (
     ).bind(tokenHash).run();
 };
 
+const TIMESTAMP_TIMEZONE_SUFFIX_PATTERN = /(Z|[+-]\d{2}:\d{2})$/i;
+
+/**
+ * SQLite stores session timestamps as UTC text (`YYYY-MM-DD HH:MM:SS`).
+ * Normalize to an ISO instant so Date.parse is unambiguous.
+ */
+const parseSqliteUtcTimestamp = (value: string | null | undefined): number => {
+    if (!value) {
+        return Number.NaN;
+    }
+
+    let normalized = value.includes("T") ? value : value.replace(" ", "T");
+    if (!TIMESTAMP_TIMEZONE_SUFFIX_PATTERN.test(normalized)) {
+        normalized += "Z";
+    }
+    return Date.parse(normalized);
+};
+
 export const validateAdminSession = async (
     c: Context<HonoCustomType>,
     sessionToken: string | null | undefined
@@ -435,8 +454,8 @@ export const validateAdminSession = async (
 
     const tokenHash = await toSha256Hex(sessionToken);
     const session = await c.env.DB.prepare(
-        `SELECT token_hash, expires_at FROM admin_session WHERE token_hash = ?`
-    ).bind(tokenHash).first<Pick<AdminSessionRow, "token_hash" | "expires_at">>();
+        `SELECT token_hash, expires_at, last_used_at FROM admin_session WHERE token_hash = ?`
+    ).bind(tokenHash).first<Pick<AdminSessionRow, "token_hash" | "expires_at" | "last_used_at">>();
 
     if (!session?.token_hash) {
         return false;
@@ -449,12 +468,15 @@ export const validateAdminSession = async (
         return false;
     }
 
-    await c.env.DB.prepare(
-        `UPDATE admin_session
-         SET last_used_at = datetime('now'),
-             updated_at = datetime('now')
-         WHERE token_hash = ?`
-    ).bind(tokenHash).run();
+    const lastUsedAtMs = parseSqliteUtcTimestamp(session.last_used_at);
+    if (!Number.isFinite(lastUsedAtMs) || Date.now() - lastUsedAtMs >= ADMIN_SESSION_TOUCH_INTERVAL_MS) {
+        await c.env.DB.prepare(
+            `UPDATE admin_session
+             SET last_used_at = datetime('now'),
+                 updated_at = datetime('now')
+             WHERE token_hash = ?`
+        ).bind(tokenHash).run();
+    }
 
     return true;
 };

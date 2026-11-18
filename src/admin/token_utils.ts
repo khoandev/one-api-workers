@@ -260,8 +260,6 @@ export const TokenUtils = {
         targetChannelConfig: ChannelConfig,
         usage: Usage
     ): Promise<UsageCostResult> {
-        console.log("Usage data:", usage);
-
         const costResult = await this.calculateUsageCost(c, model, targetChannelConfig, usage);
 
         if (costResult.hasPricing) {
@@ -278,13 +276,6 @@ export const TokenUtils = {
                 console.warn(
                     `Quota exceeded for token, usage charge not applied: ${maskedApiKey}, `
                     + `Model: ${model}, Cost: ${costResult.totalCost}`
-                );
-            } else {
-                console.log(
-                    `Model: ${model}, Channel: ${targetChannelKey}, apiKey: ${maskedApiKey}, `
-                    + `Cost: ${costResult.totalCost} (request: ${costResult.requestCost}, `
-                    + `input: ${costResult.inputCost}, cache: ${costResult.cacheCost}, `
-                    + `output: ${costResult.outputCost})`
                 );
             }
         } else {

@@ -9,6 +9,7 @@ import {
     normalizeChannelConfig,
     sanitizeChannelConfig,
 } from "../channel-config";
+import { invalidateChannelCache } from "../providers/shared/auth";
 import { buildAzureTargetUrlFromPath } from "../providers/shared/azure-target-url";
 import { buildPrefixedTargetUrl } from "../providers/shared/prefixed-target-url";
 
@@ -240,6 +241,8 @@ export class ChannelUpsertEndpoint extends OpenAPIRoute {
             return c.text('Failed to upsert channel config', 500);
         }
 
+        invalidateChannelCache(c);
+
         return {
             success: true,
             data: true
@@ -325,6 +328,8 @@ export class ChannelDeleteEndpoint extends OpenAPIRoute {
         const result = await c.env.DB.prepare(
             `DELETE FROM channel_config WHERE key = ?`
         ).bind(key).run();
+
+        invalidateChannelCache(c);
 
         return {
             success: true,

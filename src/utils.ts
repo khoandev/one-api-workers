@@ -1,5 +1,8 @@
 import { Context } from "hono";
+import { cachedValue, invalidateCached } from "./cache";
 import { normalizeChannelConfig } from "./channel-config";
+
+const SETTING_CACHE_TTL_MS = 30_000;
 
 const getJsonObjectValue = <T = any>(
     value: string | any
@@ -25,7 +28,12 @@ const getJsonObjectValue = <T = any>(
 export const getJsonSetting = async <T = any>(
     c: Context<HonoCustomType>, key: string
 ): Promise<T | null> => {
-    const value = await getSetting(c, key);
+    const value = await cachedValue(
+        c.env.DB,
+        `setting:json:${key}`,
+        SETTING_CACHE_TTL_MS,
+        () => getSetting(c, key)
+    );
     if (!value) {
         return null;
     }
@@ -59,6 +67,7 @@ export const saveSetting = async (
         `INSERT INTO settings (key, value) VALUES (?, ?)`
         + ` ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = datetime('now')`
     ).bind(key, value, value).run();
+    invalidateCached(c.env.DB, `setting:json:${key}`);
     return true;
 }
 

@@ -346,6 +346,24 @@ export class AdminLoginVerifyEndpoint extends OpenAPIRoute {
     }
 }
 
+export class AdminSessionEndpoint extends OpenAPIRoute {
+    schema = {
+        tags: ["Admin API"],
+        summary: "Check admin authentication state",
+        responses: {
+            ...CommonSuccessfulResponse(z.object({ authenticated: z.boolean() })),
+            ...CommonErrorResponse,
+        },
+    };
+
+    async handle(c: Context<HonoCustomType>) {
+        return c.json({
+            success: true,
+            data: { authenticated: true },
+        });
+    }
+}
+
 export class AdminLogoutEndpoint extends OpenAPIRoute {
     schema = {
         tags: ["Admin API"],

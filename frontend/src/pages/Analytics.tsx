@@ -1,9 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/api/client";
 import {
-  AnalyticsOverviewData,
-  AnalyticsTrendData,
-  AnalyticsBreakdownData,
+  AnalyticsDashboardData,
   AnalyticsRange,
   AnalyticsBreakdownDimension,
 } from "@/types";
@@ -13,7 +11,7 @@ import { PageContainer } from "@/components/ui/page-container";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
-import { useBillingConfig } from "@/hooks/use-billing-config";
+import { DEFAULT_BILLING_DISPLAY_DECIMALS } from "@/lib/billing";
 import { readScopedCache, writeScopedCache } from "@/lib/local-cache";
 import { cn, formatCompactNumber, formatCurrency } from "@/lib/utils";
 import { Activity, CircleDollarSign, Clock3, DatabaseZap, RefreshCw, ShieldCheck } from "lucide-react";
@@ -31,13 +29,6 @@ const formatDuration = (value: number): string => {
 
 const ANALYTICS_RANGE_CACHE_KEY = "analytics:selected-range";
 
-const getAnalyticsOverviewCacheKey = (range: AnalyticsRange): string => `analytics:overview:${range}`;
-
-const getAnalyticsTrendCacheKey = (range: AnalyticsRange): string => `analytics:trend:${range}`;
-
-const getAnalyticsBreakdownCacheKey = (range: AnalyticsRange, dimension: AnalyticsBreakdownDimension): string =>
-  `analytics:breakdown:${range}:${dimension}`;
-
 const RANGE_VALUES: AnalyticsRange[] = ["24h", "7d", "30d", "90d"];
 
 const getInitialAnalyticsRange = (): AnalyticsRange => {
@@ -49,8 +40,6 @@ const getInitialAnalyticsRange = (): AnalyticsRange => {
 export function Analytics() {
   const { t } = useTranslation();
   const [range, setRange] = useState<AnalyticsRange>(getInitialAnalyticsRange);
-  const { data: billingConfig } = useBillingConfig();
-  const displayDecimals = billingConfig?.displayDecimals ?? 6;
 
   const RANGE_OPTIONS: Array<{ value: AnalyticsRange; label: string }> = [
     { value: "24h", label: t('analytics.range24h') },
@@ -96,25 +85,8 @@ export function Analytics() {
     },
   ];
 
-  const overviewCacheEntry = useMemo(
-    () => readScopedCache<AnalyticsOverviewData>(getAnalyticsOverviewCacheKey(range)),
-    [range],
-  );
-  const trendCacheEntry = useMemo(() => readScopedCache<AnalyticsTrendData>(getAnalyticsTrendCacheKey(range)), [range]);
-  const tokenBreakdownCacheEntry = useMemo(
-    () => readScopedCache<AnalyticsBreakdownData>(getAnalyticsBreakdownCacheKey(range, "token")),
-    [range],
-  );
-  const channelBreakdownCacheEntry = useMemo(
-    () => readScopedCache<AnalyticsBreakdownData>(getAnalyticsBreakdownCacheKey(range, "channel")),
-    [range],
-  );
-  const modelBreakdownCacheEntry = useMemo(
-    () => readScopedCache<AnalyticsBreakdownData>(getAnalyticsBreakdownCacheKey(range, "model")),
-    [range],
-  );
-  const providerBreakdownCacheEntry = useMemo(
-    () => readScopedCache<AnalyticsBreakdownData>(getAnalyticsBreakdownCacheKey(range, "provider")),
+  const dashboardCacheEntry = useMemo(
+    () => readScopedCache<AnalyticsDashboardData>(`analytics:dashboard:${range}`),
     [range],
   );
 
@@ -122,112 +94,27 @@ export function Analytics() {
     writeScopedCache(ANALYTICS_RANGE_CACHE_KEY, range);
   }, [range]);
 
-  const overviewQuery = useQuery({
-    queryKey: ["analytics", "overview", range],
+  const dashboardQuery = useQuery({
+    queryKey: ["analytics", "dashboard", range],
     queryFn: async () => {
-      const response = await apiClient.getAnalyticsOverview(range);
-      const data = response.data as AnalyticsOverviewData;
-      writeScopedCache(getAnalyticsOverviewCacheKey(range), data);
+      const response = await apiClient.getAnalyticsDashboard(range);
+      const data = response.data as AnalyticsDashboardData;
+      writeScopedCache(`analytics:dashboard:${range}`, data);
       return data;
     },
-    initialData: overviewCacheEntry?.data,
-    initialDataUpdatedAt: overviewCacheEntry?.updatedAt,
+    initialData: dashboardCacheEntry?.data,
+    initialDataUpdatedAt: dashboardCacheEntry?.updatedAt,
+    staleTime: 60_000,
   });
 
-  const trendQuery = useQuery({
-    queryKey: ["analytics", "trend", range],
-    queryFn: async () => {
-      const response = await apiClient.getAnalyticsTrend(range);
-      const data = response.data as AnalyticsTrendData;
-      writeScopedCache(getAnalyticsTrendCacheKey(range), data);
-      return data;
-    },
-    initialData: trendCacheEntry?.data,
-    initialDataUpdatedAt: trendCacheEntry?.updatedAt,
-  });
-
-  const tokenBreakdownQuery = useQuery({
-    queryKey: ["analytics", "breakdown", range, "token"],
-    queryFn: async () => {
-      const response = await apiClient.getAnalyticsBreakdown(range, "token");
-      const data = response.data as AnalyticsBreakdownData;
-      writeScopedCache(getAnalyticsBreakdownCacheKey(range, "token"), data);
-      return data;
-    },
-    initialData: tokenBreakdownCacheEntry?.data,
-    initialDataUpdatedAt: tokenBreakdownCacheEntry?.updatedAt,
-  });
-
-  const channelBreakdownQuery = useQuery({
-    queryKey: ["analytics", "breakdown", range, "channel"],
-    queryFn: async () => {
-      const response = await apiClient.getAnalyticsBreakdown(range, "channel");
-      const data = response.data as AnalyticsBreakdownData;
-      writeScopedCache(getAnalyticsBreakdownCacheKey(range, "channel"), data);
-      return data;
-    },
-    initialData: channelBreakdownCacheEntry?.data,
-    initialDataUpdatedAt: channelBreakdownCacheEntry?.updatedAt,
-  });
-
-  const modelBreakdownQuery = useQuery({
-    queryKey: ["analytics", "breakdown", range, "model"],
-    queryFn: async () => {
-      const response = await apiClient.getAnalyticsBreakdown(range, "model");
-      const data = response.data as AnalyticsBreakdownData;
-      writeScopedCache(getAnalyticsBreakdownCacheKey(range, "model"), data);
-      return data;
-    },
-    initialData: modelBreakdownCacheEntry?.data,
-    initialDataUpdatedAt: modelBreakdownCacheEntry?.updatedAt,
-  });
-
-  const providerBreakdownQuery = useQuery({
-    queryKey: ["analytics", "breakdown", range, "provider"],
-    queryFn: async () => {
-      const response = await apiClient.getAnalyticsBreakdown(range, "provider");
-      const data = response.data as AnalyticsBreakdownData;
-      writeScopedCache(getAnalyticsBreakdownCacheKey(range, "provider"), data);
-      return data;
-    },
-    initialData: providerBreakdownCacheEntry?.data,
-    initialDataUpdatedAt: providerBreakdownCacheEntry?.updatedAt,
-  });
-
-  const breakdownDataMap: Record<AnalyticsBreakdownDimension, AnalyticsBreakdownData | undefined> = {
-    token: tokenBreakdownQuery.data,
-    channel: channelBreakdownQuery.data,
-    model: modelBreakdownQuery.data,
-    provider: providerBreakdownQuery.data,
-  };
-
-  const breakdownStateMap: Record<AnalyticsBreakdownDimension, { isLoading: boolean; isError: boolean }> = {
-    token: { isLoading: tokenBreakdownQuery.isLoading, isError: tokenBreakdownQuery.isError },
-    channel: { isLoading: channelBreakdownQuery.isLoading, isError: channelBreakdownQuery.isError },
-    model: { isLoading: modelBreakdownQuery.isLoading, isError: modelBreakdownQuery.isError },
-    provider: { isLoading: providerBreakdownQuery.isLoading, isError: providerBreakdownQuery.isError },
-  };
-
-  const isFetching =
-    overviewQuery.isFetching ||
-    trendQuery.isFetching ||
-    tokenBreakdownQuery.isFetching ||
-    channelBreakdownQuery.isFetching ||
-    modelBreakdownQuery.isFetching ||
-    providerBreakdownQuery.isFetching;
-
-  const overview = overviewQuery.data;
-  const trend = trendQuery.data;
+  const dashboard = dashboardQuery.data;
+  const overview = dashboard?.overview;
+  const trend = dashboard?.trend;
+  const displayDecimals = dashboard?.displayDecimals ?? DEFAULT_BILLING_DISPLAY_DECIMALS;
+  const isFetching = dashboardQuery.isFetching;
 
   const handleRefresh = async () => {
-    await Promise.all([
-      overviewQuery.refetch(),
-      trendQuery.refetch(),
-      tokenBreakdownQuery.refetch(),
-      channelBreakdownQuery.refetch(),
-      modelBreakdownQuery.refetch(),
-      providerBreakdownQuery.refetch(),
-    ]);
+    await dashboardQuery.refetch();
   };
 
   return (
@@ -324,9 +211,9 @@ export function Analytics() {
               key={chart.dimension}
               title={chart.title}
               description={chart.description}
-              items={breakdownDataMap[chart.dimension]?.items}
-              isLoading={breakdownStateMap[chart.dimension].isLoading}
-              isError={breakdownStateMap[chart.dimension].isError}
+              items={dashboard?.breakdowns?.[chart.dimension]?.items}
+              isLoading={dashboardQuery.isPending}
+              isError={dashboardQuery.isError}
               barClassName={chart.barClassName}
               badgeClassName={chart.badgeClassName}
               displayDecimals={displayDecimals}

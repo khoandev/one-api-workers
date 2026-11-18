@@ -199,11 +199,12 @@ export interface AnalyticsEventItem {
   upstreamStatus: number
 }
 
-export interface AnalyticsEventsData {
+export interface AnalyticsDashboardData {
   range: AnalyticsRange
-  sampled: boolean
-  compatibilityWarning?: string
-  items: AnalyticsEventItem[]
+  displayDecimals: number
+  overview: AnalyticsOverviewData
+  trend: AnalyticsTrendData
+  breakdowns: Record<AnalyticsBreakdownDimension, AnalyticsBreakdownData>
 }
 
 export interface UsageLogFilters {

@@ -1,6 +1,10 @@
 import { Context } from "hono"
 
+import { cachedValue, invalidateCached } from "../../cache"
 import type { RouteId } from "./route-policy"
+
+const CHANNEL_CACHE_KEY = "channel_config:all";
+const CHANNEL_CACHE_TTL_MS = 30_000;
 
 export const getApiKeyFromHeaders = (c: Context<HonoCustomType>): string | null => {
     const authHeader = c.req.raw.headers.get('Authorization');
@@ -64,26 +68,35 @@ export const fetchTokenData = async (c: Context<HonoCustomType>, apiKey: string)
     };
 }
 
+export const invalidateChannelCache = (c: Context<HonoCustomType>): void => {
+    invalidateCached(c.env.DB, CHANNEL_CACHE_KEY);
+}
+
+const loadAllChannels = (c: Context<HonoCustomType>) => {
+    return c.env.DB.prepare(
+        `SELECT key, value FROM channel_config`
+    ).all<ChannelConfigRow>();
+}
+
 export const fetchChannelsForToken = async (
     c: Context<HonoCustomType>,
     tokenData: ApiTokenData
 ) => {
-    const channelKeys = tokenData.channel_keys;
+    const result = await cachedValue(
+        c.env.DB,
+        CHANNEL_CACHE_KEY,
+        CHANNEL_CACHE_TTL_MS,
+        () => loadAllChannels(c)
+    );
 
+    const channelKeys = tokenData.channel_keys;
     if (!channelKeys || channelKeys.length === 0) {
-        return await c.env.DB.prepare(
-            `SELECT key, value FROM channel_config`
-        ).all<ChannelConfigRow>();
+        return result;
     }
 
-    const channelQuery = channelKeys.map(() => '?').join(',');
-    return await c.env.DB.prepare(
-        `SELECT key, value FROM channel_config WHERE key IN (${channelQuery})`
-    ).bind(...channelKeys).all<ChannelConfigRow>();
-}
-
-export const fetchAllChannels = async (c: Context<HonoCustomType>) => {
-    return await c.env.DB.prepare(
-        `SELECT key, value FROM channel_config`
-    ).all<ChannelConfigRow>();
+    const allowedKeys = new Set(channelKeys);
+    return {
+        ...result,
+        results: (result.results ?? []).filter((row) => allowedKeys.has(row.key)),
+    };
 }

@@ -22,6 +22,7 @@ import {
 import {
     AdminLoginStartEndpoint,
     AdminLoginVerifyEndpoint,
+    AdminSessionEndpoint,
     AdminLogoutEndpoint,
 } from "./auth_api"
 import {
@@ -29,6 +30,7 @@ import {
     AnalyticsTrendEndpoint,
     AnalyticsBreakdownEndpoint,
     AnalyticsEventsEndpoint,
+    AnalyticsDashboardEndpoint,
     UsageLogSearchEndpoint,
 } from "./analytics_api"
 import { getSystemConfig, isTelegramSecurityEnabled } from "../system-config"
@@ -93,6 +95,7 @@ api.post("/api/admin/db_initialize", DBInitializeEndpoint)
 // Authentication routes
 api.post("/api/admin/auth/login", AdminLoginStartEndpoint)
 api.post("/api/admin/auth/verify", AdminLoginVerifyEndpoint)
+api.get("/api/admin/auth/session", AdminSessionEndpoint)
 api.post("/api/admin/auth/logout", AdminLogoutEndpoint)
 
 api.get("/api/admin/channel", ChannelGetEndpoint)
@@ -117,6 +120,7 @@ api.post("/api/admin/system/config", SystemConfigUpdateEndpoint)
 api.post("/api/admin/system/telegram/test", TelegramTestMessageEndpoint)
 
 // Analytics management routes
+api.get("/api/admin/analytics/dashboard", AnalyticsDashboardEndpoint)
 api.get("/api/admin/analytics/overview", AnalyticsOverviewEndpoint)
 api.get("/api/admin/analytics/trend", AnalyticsTrendEndpoint)
 api.get("/api/admin/analytics/breakdown", AnalyticsBreakdownEndpoint)
