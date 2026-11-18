@@ -177,6 +177,22 @@ Gemini uses the official OpenAI-compatible layer. Prefer `endpoint` set to `http
 }
 ```
 
+#### Gemini Native
+
+`gemini-native` targets the native Gemini API (`/v1beta/models/{model}:generateContent`). Use it when you need Gemini's own endpoint rather than its OpenAI-compatible layer. The endpoint is a base URL; `/v1beta` is appended when the path does not already end with `/v1beta` or `/v1`.
+
+```json
+{
+  "name": "My Gemini Native Channel",
+  "type": "gemini-native",
+  "endpoint": "https://generativelanguage.googleapis.com/",
+  "api_keys": ["AIza-your-gemini-api-key"],
+  "models": [
+    { "id": "gemini-2.5-flash", "name": "gemini-2.5-flash", "enabled": true }
+  ]
+}
+```
+
 #### Azure OpenAI
 
 Azure channels target Azure OpenAI v1 (`/openai/v1/...`) directly from the resource host—no `api_version` is required.
@@ -237,7 +253,7 @@ Azure channels target Azure OpenAI v1 (`/openai/v1/...`) directly from the resou
 
 #### Claude to OpenAI
 
-Converts Claude protocol requests into upstream OpenAI-compatible calls:
+An OpenAI-compatible chat channel. `/v1/messages` requests reach it through automatic protocol conversion, same as any other OpenAI chat channel:
 
 ```json
 {
@@ -283,7 +299,8 @@ Converts Claude protocol requests into upstream OpenAI-compatible calls:
 Field notes:
 
 - `name`: display name
-- `type`: provider type — `openai`, `gemini`, `azure-openai`, `claude`, `claude-to-openai`, `openai-responses`, `azure-openai-responses`, `openai-audio`, `azure-openai-audio`
+- `type`: provider type — `openai`, `gemini`, `gemini-native`, `azure-openai`, `claude`, `claude-to-openai`, `openai-responses`, `azure-openai-responses`, `openai-audio`, `azure-openai-audio`
+- Protocol conversion: `/v1/chat/completions`, `/v1/messages`, and `/v1/responses` accept any text channel type. When client and channel protocols differ, requests and responses (including SSE) are converted automatically. Responses-only state (`previous_response_id`, conversations, prompts, native Responses tools) requires a Responses channel; multimodal content parts are not converted and need a same-protocol channel.
 - `endpoint`: API base URL (append `#` to bypass automatic path joining and use the exact URL)
 - `enabled`: whether this channel participates in routing (defaults to `true`)
 - `weight`: priority weight `0`–`5` for weighted selection (defaults to `0`)

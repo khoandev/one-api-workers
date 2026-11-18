@@ -52,6 +52,7 @@ class UnifiedProxyEndpoint extends OpenAPIRoute {
             logFailure,
             trackingState,
             setActiveChannel,
+            routeId,
         )
     }
 }

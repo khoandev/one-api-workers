@@ -13,7 +13,7 @@ export interface ChannelModelMapping {
 
 export interface ChannelConfig {
   name: string
-  type: 'openai' | 'gemini' | 'azure-openai' | 'openai-audio' | 'azure-openai-audio' | 'claude' | 'claude-to-openai' | 'openai-responses' | 'azure-openai-responses'
+  type: 'openai' | 'gemini' | 'gemini-native' | 'azure-openai' | 'openai-audio' | 'azure-openai-audio' | 'claude' | 'claude-to-openai' | 'openai-responses' | 'azure-openai-responses'
   endpoint: string
   enabled?: boolean
   weight?: number

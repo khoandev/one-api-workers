@@ -239,8 +239,8 @@ echo "--- POST /v1/responses (errors) ---"
 R=$(do_post "$API/v1/responses" -H "Content-Type: application/json" -d '{"model":"gpt-4o-resp","input":"hi"}')
 assert_http "no auth → 401" "401" "Authorization header" "$R"
 
-R=$(do_post -H "Authorization: Bearer sk-mock-all" "$API/v1/responses" -H "Content-Type: application/json" -d '{"model":"gpt-4o","input":"hi"}')
-assert_http "non-responses model → 400" "400" "Model not supported" "$R"
+R=$(do_post -H "Authorization: Bearer sk-mock-all" "$API/v1/responses" -H "Content-Type: application/json" -d '{"model":"does-not-exist","input":"hi"}')
+assert_http "unmapped model → 400" "400" "Model not supported" "$R"
 
 # ---- /v1/responses via openai-responses (non-stream) ----
 echo ""
@@ -269,6 +269,37 @@ echo "--- POST /v1/responses (azure-openai-responses, stream) ---"
 
 R=$(do_post -H "Authorization: Bearer sk-mock-all" "$API/v1/responses" -H "Content-Type: application/json" -d '{"model":"gpt-4o-azure-resp","stream":true,"input":"hi"}')
 assert_http "azure responses stream → 200 + SSE" "200" "event:" "$R"
+
+# ---- Cross-protocol conversion ----
+echo ""
+echo "--- Cross-protocol conversion ---"
+
+R=$(do_post -H "x-api-key: sk-mock-all" "$API/v1/messages" -H "Content-Type: application/json" -d '{"model":"gpt-4o","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}')
+assert_http "messages → openai chat" "200" "Mock response from gpt-4o" "$R"
+assert "messages → openai chat returns anthropic envelope" '"type":"message"' "$R"
+
+R=$(do_post -H "Authorization: Bearer sk-mock-all" "$API/v1/chat/completions" -H "Content-Type: application/json" -d '{"model":"claude-3-opus","messages":[{"role":"user","content":"hi"}]}')
+assert_http "chat → claude" "200" "Mock Claude response" "$R"
+
+R=$(do_post -H "Authorization: Bearer sk-mock-all" "$API/v1/responses" -H "Content-Type: application/json" -d '{"model":"claude-3-opus","input":"hi"}')
+assert_http "responses → claude" "200" "Mock Claude response" "$R"
+
+R=$(do_post -H "Authorization: Bearer sk-mock-all" "$API/v1/chat/completions" -H "Content-Type: application/json" -d '{"model":"gpt-4o-resp","messages":[{"role":"user","content":"hi"}]}')
+assert_http "chat → openai responses" "200" "Mock responses output" "$R"
+
+reset_mock_inspection
+R=$(do_post -H "Authorization: Bearer sk-mock-all" "$API/v1/chat/completions" -H "Content-Type: application/json" -d '{"model":"gemini-native-model","messages":[{"role":"user","content":"hi"}]}')
+assert_http "chat → gemini native" "200" "Mock Gemini native" "$R"
+INSPECT=$(get_mock_inspection "gemini-native")
+assert "gemini native upstream path uses generateContent" "models/gemini-2.0-flash:generateContent" "$INSPECT"
+assert "gemini native upstream auth uses x-goog-api-key" "\"x-goog-api-key\":\"mock-key\"" "$INSPECT"
+assert "gemini native upstream body uses contents" "\"contents\":" "$INSPECT"
+
+R=$(do_post -H "x-api-key: sk-mock-all" "$API/v1/messages" -H "Content-Type: application/json" -d '{"model":"gpt-4o","stream":true,"max_tokens":64,"messages":[{"role":"user","content":"hi"}]}')
+assert_http "messages → openai chat stream" "200" "event: message_start" "$R"
+
+R=$(do_post -H "Authorization: Bearer sk-mock-all" "$API/v1/responses" -H "Content-Type: application/json" -d '{"model":"gpt-4o","stream":true,"input":"hi"}')
+assert_http "responses → openai chat stream" "200" "event: response.output_text.delta" "$R"
 
 # ---- Quota ----
 echo ""
@@ -385,7 +416,7 @@ echo "========================================="
 # Cleanup test data
 echo ""
 echo "Cleaning up test data..."
-for key in test-openai test-azure test-claude test-c2o test-responses test-azure-resp; do
+for key in test-openai test-azure test-claude test-c2o test-responses test-azure-resp test-gemini-native; do
   "${DB_EXEC[@]}" "DELETE FROM channel_config WHERE key = '$key'" > /dev/null 2>&1
 done
 for key in sk-mock-all sk-mock-openai sk-mock-quota; do

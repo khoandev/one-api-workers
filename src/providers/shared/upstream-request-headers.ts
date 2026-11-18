@@ -56,6 +56,11 @@ export const CLAUDE_UPSTREAM_HEADER_ALLOWLIST = [
     "idempotency-key",
 ];
 
+export const GEMINI_UPSTREAM_HEADER_ALLOWLIST = [
+    "accept",
+    "content-type",
+];
+
 export const buildUpstreamRequestHeaders = (
     request: Request,
     options: BuildUpstreamHeadersOptions

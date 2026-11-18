@@ -49,6 +49,7 @@ const channelTypes = [
   { value: "claude", label: "Claude" },
   { value: "claude-to-openai", label: "Claude via OpenAI" },
   { value: "gemini", label: "Gemini" },
+  { value: "gemini-native", label: "Gemini Native" },
   { value: "openai-audio", label: "OpenAI Audio" },
   { value: "azure-openai", label: "Azure OpenAI" },
   { value: "azure-openai-audio", label: "Azure OpenAI Audio" },
@@ -437,6 +438,8 @@ const getChannelRequestPreviewPath = (type: string | undefined): string => {
     case "openai-responses":
     case "azure-openai-responses":
       return "/v1/responses";
+    case "gemini-native":
+      return "/models/{model}:generateContent";
     case "openai":
     case "azure-openai":
     case "claude-to-openai":
@@ -512,6 +515,18 @@ const buildGeminiEndpointPreview = (endpoint: string, requestPath: string): stri
   return targetUrl.toString();
 };
 
+const buildGeminiNativeEndpointPreview = (endpoint: string, requestPath: string): string => {
+  const targetUrl = new URL(endpoint);
+  const currentBasePath = trimSlashes(targetUrl.pathname);
+  const normalizedBasePath = currentBasePath.endsWith("v1beta") || currentBasePath.endsWith("v1")
+    ? currentBasePath
+    : joinPath(currentBasePath, "v1beta");
+  const [pathWithoutOperation, operationSuffix] = decodeURIComponent(requestPath).split(":");
+
+  const previewPath = joinPath(normalizedBasePath, pathWithoutOperation);
+  return `${targetUrl.origin}${previewPath}:${operationSuffix}`;
+};
+
 const buildFallbackEndpointPreview = (endpoint: string, requestPath: string): string => {
   const normalizedEndpoint = endpoint.trim().replace(/\/+$/, "");
   return `${normalizedEndpoint}${requestPath}`;
@@ -521,6 +536,8 @@ const getChannelEndpointPlaceholder = (type: string | undefined): string => {
   switch (type) {
     case "gemini":
       return "https://generativelanguage.googleapis.com/v1beta/openai/";
+    case "gemini-native":
+      return "https://generativelanguage.googleapis.com/";
     case "azure-openai":
     case "azure-openai-audio":
     case "azure-openai-responses":
@@ -542,6 +559,10 @@ const getChannelEndpointPreview = (type: string | undefined, endpoint: string): 
   try {
     if (type === "claude") {
       return buildClaudeEndpointPreview(trimmedEndpoint, requestPath);
+    }
+
+    if (type === "gemini-native") {
+      return buildGeminiNativeEndpointPreview(trimmedEndpoint, requestPath);
     }
 
     if (isGeminiChannelType(type)) {

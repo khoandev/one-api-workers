@@ -29,11 +29,13 @@ Based on <a href="https://github.com/dreamhunter2333/awsl-one-api" target="_blan
 
 | Route | Description | Channel types |
 | --- | --- | --- |
-| `/v1/chat/completions` | OpenAI Chat Completions–compatible proxy | `openai`, `azure-openai`, `gemini` |
-| `/v1/messages` | Anthropic Claude Messages–compatible proxy | `claude`, `claude-to-openai` |
-| `/v1/responses` | OpenAI / Azure Responses proxy | `openai-responses`, `azure-openai-responses` |
+| `/v1/chat/completions` | OpenAI Chat Completions–compatible proxy | Any text channel type |
+| `/v1/messages` | Anthropic Claude Messages–compatible proxy | Any text channel type |
+| `/v1/responses` | OpenAI / Azure Responses proxy | Any text channel type |
 | `/v1/audio/speech` | TTS speech generation proxy | `openai-audio`, `azure-openai-audio` |
 | `/v1/models` | Model list filtered by token permissions and quota | Returned dynamically from channels the token can access |
+
+Any text route accepts any text channel type. When the client protocol and the channel protocol differ, the request and the response (including SSE streams) are converted automatically. Same-protocol requests keep the direct proxy path. Responses-only state such as `previous_response_id`, conversations, prompts, and native Responses tools require a Responses channel.
 
 ## Deployment
 

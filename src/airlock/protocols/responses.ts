@@ -1,0 +1,443 @@
+import { z } from "zod";
+
+import { airlockRequestExtensionsSchema } from "./airlock-extensions";
+
+const openAIResponsesTextContentBlockSchema = z.object({
+  type: z.literal("input_text"),
+  text: z.string().min(1)
+});
+
+const openAIResponsesTopLevelInputItemSchema = z.object({
+  type: z.literal("input_text"),
+  text: z.string().min(1)
+});
+
+const openAIResponsesFunctionToolSchema = z.object({
+  type: z.literal("function"),
+  name: z.string().min(1),
+  description: z.string().min(1).optional(),
+  parameters: z.record(z.string(), z.unknown())
+});
+
+const openAIResponsesWebSearchToolSchema = z
+  .object({
+    type: z.literal("web_search"),
+    external_web_access: z.boolean().optional(),
+    filters: z
+      .object({
+        allowed_domains: z.array(z.string().min(1)).min(1).optional()
+      })
+      .passthrough()
+      .optional(),
+    user_location: z
+      .object({
+        type: z.string().min(1),
+        country: z.string().min(1).optional(),
+        region: z.string().min(1).optional(),
+        city: z.string().min(1).optional(),
+        timezone: z.string().min(1).optional()
+      })
+      .passthrough()
+      .optional(),
+    search_context_size: z.string().min(1).optional(),
+    search_content_types: z.array(z.string().min(1)).min(1).optional()
+  })
+  .passthrough();
+
+const openAIResponsesImageGenerationToolSchema = z
+  .object({
+    type: z.literal("image_generation"),
+    output_format: z.string().min(1).optional()
+  })
+  .passthrough();
+
+const openAIResponsesCustomToolSchema = z
+  .object({
+    type: z.literal("custom"),
+    name: z.string().min(1),
+    description: z.string().min(1).optional(),
+    format: z
+      .object({
+        type: z.string().min(1)
+      })
+      .passthrough()
+      .optional()
+  })
+  .passthrough();
+
+const openAIResponsesForcedFunctionToolChoiceSchema = z.object({
+  type: z.literal("function"),
+  name: z.string().min(1)
+});
+
+const openAIResponsesTextFormatSchema = z.object({
+  type: z.literal("text")
+});
+
+const openAIResponsesJsonObjectFormatSchema = z.object({
+  type: z.literal("json_object")
+});
+
+const openAIResponsesJsonSchemaFormatSchema = z.object({
+  type: z.literal("json_schema"),
+  name: z.string().min(1),
+  schema: z.record(z.string(), z.unknown()),
+  strict: z.boolean().optional()
+});
+
+const openAIResponsesTextConfigSchema = z
+  .object({
+    format: z
+      .union([
+        openAIResponsesTextFormatSchema,
+        openAIResponsesJsonObjectFormatSchema,
+        openAIResponsesJsonSchemaFormatSchema
+      ])
+      .optional(),
+    verbosity: z.enum(["low", "medium", "high"]).optional()
+  })
+  .refine(
+    (value) => value.format !== undefined || value.verbosity !== undefined,
+    {
+      message: "text requires format or verbosity",
+      path: ["format"]
+    }
+  );
+
+const openAIResponsesPromptSchema = z
+  .object({
+    id: z.string().min(1).optional(),
+    prompt_id: z.string().min(1).optional(),
+    version: z
+      .union([z.string().min(1), z.number().int().positive()])
+      .optional(),
+    variables: z
+      .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+      .optional()
+  })
+  .refine((value) => value.id !== undefined || value.prompt_id !== undefined, {
+    message: "Prompt id is required",
+    path: ["id"]
+  });
+
+const openAIResponsesConversationSchema = z
+  .object({
+    id: z.string().min(1)
+  })
+  .strict();
+
+const openAIResponsesMetadataSchema = z
+  .record(z.string().min(1).max(64), z.string().max(512))
+  .refine((value) => Object.keys(value).length <= 16, {
+    message: "metadata can have at most 16 entries"
+  });
+
+const openAIResponsesReasoningSchema = z
+  .object({
+    effort: z
+      .enum(["none", "minimal", "low", "medium", "high", "xhigh"])
+      .optional(),
+    summary: z.enum(["auto", "concise", "detailed"]).optional(),
+    generate_summary: z.enum(["auto", "concise", "detailed"]).optional()
+  })
+  .superRefine((value, context) => {
+    if (
+      value.summary !== undefined &&
+      value.generate_summary !== undefined &&
+      value.summary !== value.generate_summary
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "reasoning.summary must match reasoning.generate_summary",
+        path: ["summary"]
+      });
+    }
+  });
+
+const openAIResponsesStreamOptionsSchema = z.object({
+  include_obfuscation: z.literal(false)
+});
+
+const openAIResponsesIncludeSchema = z
+  .array(
+    z.union([
+      z.literal("message.output_text.logprobs"),
+      z.literal("reasoning.encrypted_content")
+    ])
+  )
+  .min(1);
+
+const openAIResponsesOutputTextContentBlockSchema = z.object({
+  type: z.literal("output_text"),
+  text: z.string().min(1)
+});
+
+const openAIResponsesInputMessageSchema = z.object({
+  role: z.enum(["user", "assistant", "system", "developer"]),
+  content: z.union([
+    z.string().min(1),
+    z.array(openAIResponsesTextContentBlockSchema).min(1)
+  ])
+});
+
+const openAIResponsesMessageItemSchema = z.object({
+  type: z.literal("message"),
+  role: z.enum(["user", "assistant", "system", "developer"]),
+  content: z.union([
+    z.string().min(1),
+    z.array(openAIResponsesTextContentBlockSchema).min(1),
+    z.array(openAIResponsesOutputTextContentBlockSchema).min(1)
+  ])
+});
+
+const openAIResponsesFunctionCallItemSchema = z.object({
+  type: z.literal("function_call"),
+  call_id: z.string().min(1),
+  name: z.string().min(1),
+  arguments: z.string()
+});
+
+const openAIResponsesFunctionCallOutputItemSchema = z.object({
+  type: z.literal("function_call_output"),
+  call_id: z.string().min(1),
+  output: z.string()
+});
+
+const openAIResponsesReasoningSummaryTextSchema = z.object({
+  type: z.literal("summary_text"),
+  text: z.string().min(1)
+});
+
+const openAIResponsesReasoningItemSchema = z.object({
+  type: z.literal("reasoning"),
+  id: z.string().min(1).optional(),
+  encrypted_content: z.string().min(1).optional(),
+  summary: z.array(openAIResponsesReasoningSummaryTextSchema).optional()
+});
+
+const openAIResponsesLocalShellCallItemSchema = z
+  .object({
+    type: z.literal("local_shell_call"),
+    id: z.string().min(1).optional(),
+    call_id: z.string().min(1).nullable().optional(),
+    status: z.string().min(1),
+    action: z
+      .object({
+        type: z.string().min(1)
+      })
+      .passthrough()
+  })
+  .passthrough();
+
+const openAIResponsesToolSearchCallItemSchema = z
+  .object({
+    type: z.literal("tool_search_call"),
+    id: z.string().min(1).optional(),
+    call_id: z.string().min(1).nullable().optional(),
+    status: z.string().min(1).optional(),
+    execution: z.string().min(1),
+    arguments: z.unknown()
+  })
+  .passthrough();
+
+const openAIResponsesCustomToolCallItemSchema = z
+  .object({
+    type: z.literal("custom_tool_call"),
+    id: z.string().min(1).optional(),
+    status: z.string().min(1).optional(),
+    call_id: z.string().min(1),
+    name: z.string().min(1),
+    input: z.string()
+  })
+  .passthrough();
+
+const openAIResponsesCustomToolCallOutputItemSchema = z
+  .object({
+    type: z.literal("custom_tool_call_output"),
+    call_id: z.string().min(1),
+    name: z.string().min(1).optional(),
+    output: z.union([z.string(), z.array(z.unknown()).min(1)])
+  })
+  .passthrough();
+
+const openAIResponsesToolSearchOutputItemSchema = z
+  .object({
+    type: z.literal("tool_search_output"),
+    call_id: z.string().min(1).nullable().optional(),
+    status: z.string().min(1),
+    execution: z.string().min(1),
+    tools: z.array(z.unknown())
+  })
+  .passthrough();
+
+const openAIResponsesTypedInputItemSchema = z.union([
+  openAIResponsesTopLevelInputItemSchema,
+  openAIResponsesMessageItemSchema,
+  openAIResponsesFunctionCallItemSchema,
+  openAIResponsesFunctionCallOutputItemSchema,
+  openAIResponsesReasoningItemSchema,
+  openAIResponsesLocalShellCallItemSchema,
+  openAIResponsesToolSearchCallItemSchema,
+  openAIResponsesCustomToolCallItemSchema,
+  openAIResponsesCustomToolCallOutputItemSchema,
+  openAIResponsesToolSearchOutputItemSchema
+]);
+
+export const openAIResponsesRequestSchema = z
+  .object({
+    model: z.string().min(1),
+    stream: z.boolean().default(false),
+    safety_identifier: z.string().min(1).optional(),
+    metadata: openAIResponsesMetadataSchema.optional(),
+    service_tier: z
+      .enum(["auto", "default", "flex", "priority", "scale"])
+      .optional(),
+    store: z.boolean().optional(),
+    prompt_cache_key: z.string().min(1).optional(),
+    prompt_cache_retention: z.enum(["in_memory", "24h"]).optional(),
+    prompt: openAIResponsesPromptSchema.optional(),
+    prompt_id: z.string().min(1).optional(),
+    previous_response_id: z.string().min(1).optional(),
+    conversation: z
+      .union([z.string().min(1), openAIResponsesConversationSchema])
+      .optional(),
+    truncation: z.enum(["auto", "disabled"]).optional(),
+    stop: z
+      .union([z.string().min(1), z.array(z.string().min(1)).min(1)])
+      .optional(),
+    max_output_tokens: z.number().int().positive().optional(),
+    temperature: z.number().min(0).max(2).optional(),
+    top_p: z.number().min(0).max(1).optional(),
+    instructions: z.string().min(1).optional(),
+    reasoning: openAIResponsesReasoningSchema.nullable().optional(),
+    text: openAIResponsesTextConfigSchema.optional(),
+    include: openAIResponsesIncludeSchema.optional(),
+    top_logprobs: z.number().int().min(0).max(20).optional(),
+    stream_options: openAIResponsesStreamOptionsSchema.optional(),
+    parallel_tool_calls: z.boolean().optional(),
+    tools: z
+      .array(
+        z.union([
+          openAIResponsesFunctionToolSchema,
+          openAIResponsesWebSearchToolSchema,
+          openAIResponsesImageGenerationToolSchema,
+          openAIResponsesCustomToolSchema
+        ])
+      )
+      .min(1)
+      .optional(),
+    tool_choice: z
+      .union([
+        z.literal("auto"),
+        z.literal("required"),
+        z.literal("none"),
+        openAIResponsesForcedFunctionToolChoiceSchema
+      ])
+      .optional(),
+    input: z
+      .union([
+        z.string().min(1),
+        z.array(openAIResponsesInputMessageSchema).min(1),
+        z.array(openAIResponsesTypedInputItemSchema).min(1)
+      ])
+      .optional(),
+    airlock: airlockRequestExtensionsSchema.optional()
+  })
+  .passthrough()
+  .refine(
+    (value) =>
+      value.input !== undefined ||
+      value.prompt !== undefined ||
+      value.prompt_id !== undefined,
+    {
+      message: "Either input or prompt is required",
+      path: ["input"]
+    }
+  )
+  .refine(
+    (value) =>
+      value.previous_response_id === undefined ||
+      value.conversation === undefined,
+    {
+      message: "previous_response_id and conversation are mutually exclusive",
+      path: ["conversation"]
+    }
+  )
+  .superRefine((value, context) => {
+    const nestedPromptId = value.prompt?.id ?? value.prompt?.prompt_id;
+
+    if (
+      value.prompt_id !== undefined &&
+      nestedPromptId !== undefined &&
+      value.prompt_id !== nestedPromptId
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "prompt_id must match prompt.id when both are provided",
+        path: ["prompt_id"]
+      });
+    }
+
+    if (!value.stream && value.stream_options !== undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "OpenAI Responses stream_options requires stream=true",
+        path: ["stream_options"]
+      });
+    }
+
+    if (
+      value.top_logprobs !== undefined &&
+      !value.include?.includes("message.output_text.logprobs")
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "top_logprobs requires include to contain message.output_text.logprobs",
+        path: ["top_logprobs"]
+      });
+    }
+  });
+
+export const openAIResponsesResponseSchema = z.object({
+  id: z.string().min(1),
+  object: z.literal("response"),
+  model: z.string().min(1),
+  status: z.literal("completed"),
+  output: z.array(z.unknown()),
+  output_text: z.string(),
+  metadata: openAIResponsesMetadataSchema.optional(),
+  conversation: z
+    .object({
+      id: z.string().min(1)
+    })
+    .strict()
+    .optional(),
+  service_tier: z
+    .enum(["auto", "default", "flex", "priority", "scale"])
+    .optional(),
+  store: z.boolean().optional(),
+  prompt_cache_key: z.string().min(1).optional(),
+  prompt_cache_retention: z.enum(["in_memory", "24h"]).optional(),
+  truncation: z.enum(["auto", "disabled"]).optional(),
+  text: z
+    .object({
+      verbosity: z.enum(["low", "medium", "high"]).optional()
+    })
+    .strict()
+    .optional(),
+  usage: z
+    .object({
+      input_tokens: z.number().int().nonnegative(),
+      output_tokens: z.number().int().nonnegative(),
+      total_tokens: z.number().int().nonnegative()
+    })
+    .optional()
+});
+
+export type OpenAIResponsesRequest = z.infer<
+  typeof openAIResponsesRequestSchema
+>;
+export type OpenAIResponsesResponse = z.infer<
+  typeof openAIResponsesResponseSchema
+>;

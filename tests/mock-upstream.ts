@@ -5,7 +5,7 @@
  */
 
 const PORT = 9999
-const INSPECTABLE_REQUEST_KEYS = ["chat-completions", "messages", "models", "responses"] as const
+const INSPECTABLE_REQUEST_KEYS = ["chat-completions", "gemini-native", "messages", "models", "responses"] as const
 
 type InspectableRequestKey = typeof INSPECTABLE_REQUEST_KEYS[number]
 
@@ -23,6 +23,10 @@ const toHeaderRecord = (headers: Headers): Record<string, string> => {
 }
 
 const getCaptureKey = (path: string): InspectableRequestKey | null => {
+  if (path.endsWith(":generateContent") || path.endsWith(":streamGenerateContent")) {
+    return "gemini-native"
+  }
+
   if (path.endsWith("/chat/completions")) {
     return "chat-completions"
   }
@@ -110,6 +114,24 @@ const openaiResponsesStreamChunks = (model: string) => {
   ]
 }
 
+// --- Gemini native generateContent (non-stream) ---
+const geminiNativeResponse = (model: string) => ({
+  responseId: "gemini-mock-001",
+  modelVersion: model,
+  candidates: [{
+    content: { role: "model", parts: [{ text: "Mock Gemini native" }] },
+    finishReason: "STOP",
+    index: 0,
+  }],
+  usageMetadata: { promptTokenCount: 7, candidatesTokenCount: 3, totalTokenCount: 10 },
+})
+
+// --- Gemini native generateContent (stream) ---
+const geminiNativeStreamChunks = (model: string) => [
+  `data: ${JSON.stringify({ responseId: "gemini-mock-001", modelVersion: model, candidates: [{ content: { role: "model", parts: [{ text: "Mock " }] }, index: 0 }] })}\n\n`,
+  `data: ${JSON.stringify({ responseId: "gemini-mock-001", modelVersion: model, candidates: [{ content: { role: "model", parts: [{ text: "Gemini native stream" }] }, finishReason: "STOP", index: 0 }], usageMetadata: { promptTokenCount: 7, candidatesTokenCount: 3, totalTokenCount: 10 } })}\n\n`,
+]
+
 // --- Claude Messages (non-stream) ---
 const claudeMessagesResponse = (model: string) => ({
   id: "msg-mock-claude-001",
@@ -155,7 +177,8 @@ const server = Bun.serve({
     }
 
     const body = req.method === "POST" ? await req.json().catch(() => ({})) : {}
-    const model = (body as any).model || "mock-model"
+    const pathModel = path.match(/\/models\/([^:/]+):(?:generateContent|streamGenerateContent)$/)?.[1]
+    const model = (body as any).model || pathModel || "mock-model"
     const isStream = (body as any).stream === true
 
     console.log(`[MOCK] ${req.method} ${path} model=${model} stream=${isStream}`)
@@ -199,6 +222,26 @@ const server = Bun.serve({
         })
       }
       return Response.json(openaiResponsesResponse(model))
+    }
+
+    // Gemini native generateContent / streamGenerateContent
+    if (path.endsWith(":generateContent") || path.endsWith(":streamGenerateContent")) {
+      if (isStream) {
+        const chunks = geminiNativeStreamChunks(model)
+        const stream = new ReadableStream({
+          async start(controller) {
+            for (const chunk of chunks) {
+              controller.enqueue(new TextEncoder().encode(chunk))
+              await new Promise(r => setTimeout(r, 50))
+            }
+            controller.close()
+          }
+        })
+        return new Response(stream, {
+          headers: { "content-type": "text/event-stream", "cache-control": "no-cache" },
+        })
+      }
+      return Response.json(geminiNativeResponse(model))
     }
 
     // Claude Messages API

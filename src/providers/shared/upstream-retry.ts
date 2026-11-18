@@ -17,6 +17,7 @@ import {
     getProvider,
     ProviderFetch,
 } from "./provider-registry";
+import type { RouteId } from "./route-policy";
 
 const RETRYABLE_STATUS_CODES = new Set([401, 403, 408, 409, 429, 500, 502, 503, 504, 529]);
 
@@ -144,6 +145,7 @@ const executeChannelWithRetries = async (
     saveUsage: (usage: Usage) => Promise<void>,
     trackingState: RequestTrackingState,
     provider: ProviderFetch,
+    routeId: RouteId,
 ): Promise<ChannelExecutionResult> => {
     const normalizedConfig = normalizeChannelConfig(channel.config);
     const initialKey = pickInitialKey(normalizedConfig);
@@ -179,6 +181,7 @@ const executeChannelWithRetries = async (
                 buildChannelRequestBody(requestBody, channel),
                 saveUsage,
                 trackingState,
+                routeId,
             );
 
             if (response.ok) {
@@ -270,6 +273,7 @@ export const executeWithFallbackChannels = async (
     logFailure: (errorCode: string, errorSummary?: string) => void,
     trackingState: RequestTrackingState,
     setActiveChannel: (channel: ResolvedChannelCandidate) => void,
+    routeId: RouteId,
 ): Promise<Response> => {
     const attemptedChannelKeys = new Set<string>();
     let currentChannel = initialChannel;
@@ -280,7 +284,7 @@ export const executeWithFallbackChannels = async (
         setActiveChannel(currentChannel);
         trackingState.errorSummary = undefined;
 
-        const provider = getProvider(currentChannel.config.type || "");
+        const provider = getProvider(routeId, currentChannel.config.type || "");
         if (!provider) {
             const errorSummary = "Channel type not supported";
             const response = c.text(errorSummary, 400);
@@ -314,6 +318,7 @@ export const executeWithFallbackChannels = async (
             saveUsage,
             trackingState,
             provider,
+            routeId,
         );
 
         if (execution.response.ok) {

@@ -1,6 +1,6 @@
 import { Context } from "hono"
 import { getApiKeyFromHeaders, fetchTokenData, fetchChannelsForToken } from "./auth"
-import { RouteId, getRoutePolicy } from "./route-policy"
+import { RouteId, isChannelAllowedForRoute } from "./route-policy"
 import { findChannelModelMapping, getJsonSetting } from "../../utils"
 import { CONSTANTS } from "../../constants"
 import { TokenUtils } from "../../admin/token_utils"
@@ -74,9 +74,6 @@ export const resolveChannel = async (
         return c.text("Model is required", 400);
     }
 
-    const policy = getRoutePolicy(routeId);
-    const allowedTypes = policy.allowedTypes;
-
     let availableChannels: ResolvedChannelCandidate[] = [];
     let hasDisabledMatchingChannel = false;
 
@@ -93,7 +90,7 @@ export const resolveChannel = async (
             continue;
         }
 
-        if (allowedTypes && (!config.type || !allowedTypes.includes(config.type))) {
+        if (!isChannelAllowedForRoute(routeId, config)) {
             continue;
         }
 

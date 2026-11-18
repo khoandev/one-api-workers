@@ -1,7 +1,9 @@
 import { Context } from "hono"
-import {
+import type {
     OpenAIResponsesResponse,
     OpenAIResponsesStreamEvent,
+} from "./usage-utils"
+import {
     extractUsageFromResponse,
     estimateUsageFromBodies,
 } from "./usage-utils"
@@ -121,4 +123,5 @@ export const checkoutResponsesUsageData = async (
     }
 }
 
-export { OpenAIResponsesResponse, extractUsageFromResponse, estimateUsageFromBodies }
+export type { OpenAIResponsesResponse }
+export { extractUsageFromResponse, estimateUsageFromBodies }

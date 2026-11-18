@@ -177,6 +177,22 @@ Gemini 通过官方 OpenAI 兼容层接入，建议将 `endpoint` 配置为 `htt
 }
 ```
 
+#### Gemini Native
+
+`gemini-native` 直连 Gemini 原生接口（`/v1beta/models/{model}:generateContent`），适用于必须使用 Gemini 官方端点而非其 OpenAI 兼容层的场景。`endpoint` 填基础地址；若路径末尾不是 `/v1beta` 或 `/v1`，会自动追加 `/v1beta`。
+
+```json
+{
+  "name": "My Gemini Native Channel",
+  "type": "gemini-native",
+  "endpoint": "https://generativelanguage.googleapis.com/",
+  "api_keys": ["AIza-your-gemini-api-key"],
+  "models": [
+    { "id": "gemini-2.5-flash", "name": "gemini-2.5-flash", "enabled": true }
+  ]
+}
+```
+
 #### Azure OpenAI
 
 Azure 渠道默认直接走资源主机的 Azure OpenAI v1 路径（`/openai/v1/...`），无需填写 `api_version`。
@@ -237,7 +253,7 @@ Azure 渠道默认直接走资源主机的 Azure OpenAI v1 路径（`/openai/v1/
 
 #### Claude to OpenAI
 
-将 Claude 协议请求转换为上游 OpenAI 格式执行：
+OpenAI 兼容聊天渠道。`/v1/messages` 请求与其他 OpenAI 聊天渠道一样通过自动协议转换进入：
 
 ```json
 {
@@ -283,7 +299,8 @@ Azure 渠道默认直接走资源主机的 Azure OpenAI v1 路径（`/openai/v1/
 渠道配置字段说明：
 
 - `name`：渠道显示名称
-- `type`：服务商类型，支持 `openai`、`gemini`、`azure-openai`、`claude`、`claude-to-openai`、`openai-responses`、`azure-openai-responses`、`openai-audio`、`azure-openai-audio`
+- `type`：服务商类型，支持 `openai`、`gemini`、`gemini-native`、`azure-openai`、`claude`、`claude-to-openai`、`openai-responses`、`azure-openai-responses`、`openai-audio`、`azure-openai-audio`
+- 协议转换：`/v1/chat/completions`、`/v1/messages`、`/v1/responses` 均接受任意文本渠道类型；客户端协议与渠道协议不一致时，请求与响应（含 SSE 流）自动转换。仅 Responses 支持的字段（`previous_response_id`、会话、prompt、Responses 原生工具）需要 Responses 渠道；多模态内容不参与转换，需使用同协议渠道。
 - `endpoint`：API 端点地址（末尾加 `#` 可跳过自动路径拼接并原样请求该 URL）
 - `enabled`：是否参与路由（默认 `true`）
 - `weight`：权重优先级（`0`–`5`，默认 `0`）

@@ -61,6 +61,7 @@ type ChannelType =
     | "claude-to-openai"
     | "openai-responses"
     | "azure-openai-responses"
+    | "gemini-native"
     | undefined
     | null;
 
