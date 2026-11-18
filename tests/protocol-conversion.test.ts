@@ -577,51 +577,6 @@ test("messages to gemini native converts the request and response", async () => 
     expect(saved).toEqual([{ prompt_tokens: 7, completion_tokens: 3, total_tokens: 10 }]);
 });
 
-test("messages to claude-to-openai alias uses the openai chat path", async () => {
-    let upstreamRequest: Request | undefined;
-    mockUpstream((request) => {
-        upstreamRequest = request;
-        return jsonResponse(chatCompletion("alias response"));
-    });
-
-    const { response } = await runProvider("messages", "claude-to-openai", {
-        endpoint: "https://upstream.example",
-        api_key: "k",
-    }, {
-        model: "gpt-4o",
-        max_tokens: 64,
-        messages: [{ role: "user", content: "hello" }],
-    });
-
-    expect(upstreamRequest?.url).toBe("https://upstream.example/v1/chat/completions");
-    const body = await response.json() as Record<string, any>;
-    expect(body.type).toBe("message");
-    expect(body.content[0].text).toBe("alias response");
-});
-
-test("messages to gemini uses the openai compatible gemini path", async () => {
-    let upstreamRequest: Request | undefined;
-    mockUpstream((request) => {
-        upstreamRequest = request;
-        return jsonResponse(chatCompletion("gemini compatible"));
-    });
-
-    const { response } = await runProvider("messages", "gemini", {
-        endpoint: "https://generativelanguage.googleapis.com",
-        api_key: "k",
-    }, {
-        model: "gemini-2.0-flash",
-        max_tokens: 64,
-        messages: [{ role: "user", content: "hello" }],
-    });
-
-    expect(upstreamRequest?.url).toBe(
-        "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-    );
-    const body = await response.json() as Record<string, any>;
-    expect(body.content[0].text).toBe("gemini compatible");
-});
-
 test("chat to openai responses converts messages into responses input", async () => {
     let upstreamRequest: Request | undefined;
     mockUpstream((request) => {
@@ -735,28 +690,6 @@ test("responses to claude converts input into anthropic messages", async () => {
     expect(body.object).toBe("response");
     expect(body.output_text).toBe("mock claude responses");
     expect(saved).toEqual([{ prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 }]);
-});
-
-test("responses to gemini uses the openai compatible gemini path", async () => {
-    let upstreamRequest: Request | undefined;
-    mockUpstream((request) => {
-        upstreamRequest = request;
-        return jsonResponse(chatCompletion("gemini responses"));
-    });
-
-    const { response } = await runProvider("responses", "gemini", {
-        endpoint: "https://generativelanguage.googleapis.com",
-        api_key: "k",
-    }, {
-        model: "gemini-2.0-flash",
-        input: "hi",
-    });
-
-    expect(upstreamRequest?.url).toBe(
-        "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-    );
-    const body = await response.json() as Record<string, any>;
-    expect(body.output_text).toBe("gemini responses");
 });
 
 test("responses to gemini native converts the request and response", async () => {
@@ -1145,11 +1078,9 @@ test("route policy accepts every text protocol on text routes", () => {
     const textRoutes = ["chat-completions", "messages", "responses"] as const;
     const textTypes: ChannelType[] = [
         "openai",
-        "gemini",
         "gemini-native",
         "azure-openai",
         "claude",
-        "claude-to-openai",
         "openai-responses",
         "azure-openai-responses",
     ];
@@ -1168,7 +1099,6 @@ test("route policy accepts every text protocol on text routes", () => {
 
 test("dispatch forwards same protocols and converts cross protocols", () => {
     expect(getProvider("chat-completions", "openai")).toBe(passthroughProxy.fetch);
-    expect(getProvider("chat-completions", "gemini")).toBe(passthroughProxy.fetch);
     expect(getProvider("chat-completions", "azure-openai")).toBe(passthroughProxy.fetch);
     expect(getProvider("messages", "claude")).toBe(passthroughProxy.fetch);
     expect(getProvider("responses", "openai-responses")).toBe(passthroughProxy.fetch);
@@ -1179,7 +1109,6 @@ test("dispatch forwards same protocols and converts cross protocols", () => {
     expect(getProvider("gemini-generate-content", "openai")).toBe(protocolConversion.fetch);
     expect(getProvider("gemini-generate-content", "claude")).toBe(protocolConversion.fetch);
     expect(getProvider("messages", "openai")).toBe(protocolConversion.fetch);
-    expect(getProvider("messages", "claude-to-openai")).toBe(protocolConversion.fetch);
     expect(getProvider("messages", "openai-responses")).toBe(protocolConversion.fetch);
     expect(getProvider("messages", "gemini-native")).toBe(protocolConversion.fetch);
     expect(getProvider("chat-completions", "claude")).toBe(protocolConversion.fetch);
@@ -1190,6 +1119,10 @@ test("dispatch forwards same protocols and converts cross protocols", () => {
     expect(getProvider("responses", "openai")).toBe(protocolConversion.fetch);
 
     expect(getProvider("chat-completions", "unknown")).toBeUndefined();
+    expect(getProvider("chat-completions", "gemini")).toBeUndefined();
+    expect(getProvider("messages", "claude-to-openai")).toBeUndefined();
+    expect(isChannelAllowedForRoute("chat-completions", { type: "gemini" as ChannelType, endpoint: "https://upstream.example" })).toBe(false);
+    expect(isChannelAllowedForRoute("messages", { type: "claude-to-openai" as ChannelType, endpoint: "https://upstream.example" })).toBe(false);
 });
 
 test("chat tool calls convert to anthropic tool use", async () => {
@@ -1549,10 +1482,6 @@ test("resolveUpstreamBase normalizes every channel endpoint form", () => {
         type: "claude",
         endpoint: "https://api.anthropic.com",
     }).baseUrl).toBe("https://api.anthropic.com/v1");
-    expect(resolveUpstreamBase({
-        type: "gemini",
-        endpoint: "https://generativelanguage.googleapis.com",
-    }).baseUrl).toBe("https://generativelanguage.googleapis.com/v1beta/openai");
 
     expect(resolveUpstreamBase({
         type: "gemini-native",
@@ -1754,40 +1683,6 @@ const conversionStreamCases: Array<{
         },
     },
     {
-        label: "messages to gemini",
-        routeId: "messages",
-        type: "gemini",
-        endpoint: "https://generativelanguage.googleapis.com",
-        upstream: chatSse(["hel", "lo"]),
-        request: {
-            model: "gemini-2.0-flash",
-            max_tokens: 64,
-            stream: true,
-            messages: [{ role: "user", content: "hello" }],
-        },
-        assertRequest: (request) => {
-            expect(request.url).toBe(
-                "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-            );
-        },
-    },
-    {
-        label: "messages to claude-to-openai",
-        routeId: "messages",
-        type: "claude-to-openai",
-        endpoint: "https://upstream.example",
-        upstream: chatSse(["hel", "lo"]),
-        request: {
-            model: "gpt-4o",
-            max_tokens: 64,
-            stream: true,
-            messages: [{ role: "user", content: "hello" }],
-        },
-        assertRequest: (request) => {
-            expect(request.url).toBe("https://upstream.example/v1/chat/completions");
-        },
-    },
-    {
         label: "chat to azure openai responses",
         routeId: "chat-completions",
         type: "azure-openai-responses",
@@ -1813,30 +1708,6 @@ const conversionStreamCases: Array<{
         assertRequest: (request) => {
             expect(request.url).toBe("https://r.openai.azure.com/openai/v1/chat/completions");
             expect(request.headers.get("api-key")).toBe("k");
-        },
-    },
-    {
-        label: "responses to gemini",
-        routeId: "responses",
-        type: "gemini",
-        endpoint: "https://generativelanguage.googleapis.com",
-        upstream: chatSse(["hel", "lo"]),
-        request: { model: "gemini-2.0-flash", stream: true, input: "hi" },
-        assertRequest: (request) => {
-            expect(request.url).toBe(
-                "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-            );
-        },
-    },
-    {
-        label: "responses to claude-to-openai",
-        routeId: "responses",
-        type: "claude-to-openai",
-        endpoint: "https://upstream.example",
-        upstream: chatSse(["hel", "lo"]),
-        request: { model: "gpt-4o", stream: true, input: "hi" },
-        assertRequest: (request) => {
-            expect(request.url).toBe("https://upstream.example/v1/chat/completions");
         },
     },
 ];
@@ -1909,22 +1780,6 @@ test("responses to azure openai converts the response object", async () => {
     const body = await response.json() as Record<string, any>;
     expect(body.object).toBe("response");
     expect(body.output_text).toBe("azure chat");
-});
-
-test("responses to claude-to-openai converts the response object", async () => {
-    mockUpstream(() => jsonResponse(chatCompletion("c2o chat")));
-
-    const { response } = await runProvider("responses", "claude-to-openai", {
-        endpoint: "https://upstream.example",
-        api_key: "k",
-    }, {
-        model: "gpt-4o",
-        input: "hi",
-    });
-
-    const body = await response.json() as Record<string, any>;
-    expect(body.object).toBe("response");
-    expect(body.output_text).toBe("c2o chat");
 });
 
 const upstreamErrorCases: Array<{

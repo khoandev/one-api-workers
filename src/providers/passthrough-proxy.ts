@@ -88,10 +88,6 @@ const buildTargetUrl = (
         )
     }
 
-    if (config.type === "gemini") {
-        return buildPrefixedTargetUrl(config.endpoint, pathname, "/v1", "gemini")
-    }
-
     return buildPrefixedTargetUrl(config.endpoint, pathname)
 }
 

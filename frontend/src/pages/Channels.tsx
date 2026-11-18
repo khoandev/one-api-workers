@@ -47,8 +47,6 @@ const channelTypes = [
   { value: "openai", label: "OpenAI" },
   { value: "openai-responses", label: "OpenAI Responses" },
   { value: "claude", label: "Claude" },
-  { value: "claude-to-openai", label: "Claude via OpenAI" },
-  { value: "gemini", label: "Gemini" },
   { value: "gemini-native", label: "Gemini Native" },
   { value: "openai-audio", label: "OpenAI Audio" },
   { value: "azure-openai", label: "Azure OpenAI" },
@@ -442,18 +440,13 @@ const getChannelRequestPreviewPath = (type: string | undefined): string => {
       return "/models/{model}:generateContent";
     case "openai":
     case "azure-openai":
-    case "claude-to-openai":
     default:
       return "/v1/chat/completions";
   }
 };
 
-const isGeminiChannelType = (type: string | undefined): boolean => {
-  return type === "gemini";
-};
-
 const isOpenAIStyleChannelType = (type: string | undefined): boolean => {
-  return ["openai", "openai-audio", "openai-responses", "claude-to-openai"].includes(type || "");
+  return ["openai", "openai-audio", "openai-responses"].includes(type || "");
 };
 
 const isAzureChannelType = (type: string | undefined): boolean => {
@@ -501,22 +494,6 @@ const buildClaudeEndpointPreview = (endpoint: string, requestPath: string): stri
   return buildPrefixedEndpointPreview(endpoint, requestPath);
 };
 
-const buildGeminiEndpointPreview = (endpoint: string, requestPath: string): string => {
-  const targetUrl = new URL(endpoint);
-  const currentBasePath = trimSlashes(targetUrl.pathname);
-  const normalizedRequestPath = requestPath.replace(/^\/v1(?=\/|$)/, "");
-  const geminiBasePath = currentBasePath.endsWith("v1beta/openai")
-    ? currentBasePath
-    : currentBasePath.endsWith("v1beta")
-      ? joinPath(currentBasePath, "openai")
-      : currentBasePath.endsWith("openai")
-        ? currentBasePath
-        : joinPath(currentBasePath, "v1beta/openai");
-
-  targetUrl.pathname = joinPath(geminiBasePath, normalizedRequestPath);
-  return targetUrl.toString();
-};
-
 const buildGeminiNativeEndpointPreview = (endpoint: string, requestPath: string): string => {
   const targetUrl = new URL(endpoint);
   const currentBasePath = trimSlashes(targetUrl.pathname);
@@ -536,8 +513,6 @@ const buildFallbackEndpointPreview = (endpoint: string, requestPath: string): st
 
 const getChannelEndpointPlaceholder = (type: string | undefined): string => {
   switch (type) {
-    case "gemini":
-      return "https://generativelanguage.googleapis.com/v1beta/openai/";
     case "gemini-native":
       return "https://generativelanguage.googleapis.com/";
     case "azure-openai":
@@ -565,10 +540,6 @@ const getChannelEndpointPreview = (type: string | undefined, endpoint: string): 
 
     if (type === "gemini-native") {
       return buildGeminiNativeEndpointPreview(trimmedEndpoint, requestPath);
-    }
-
-    if (isGeminiChannelType(type)) {
-      return buildGeminiEndpointPreview(trimmedEndpoint, requestPath);
     }
 
     if (isAzureChannelType(type)) {

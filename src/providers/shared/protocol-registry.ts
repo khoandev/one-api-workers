@@ -32,16 +32,6 @@ const CHANNEL_PROTOCOLS: Record<string, ChannelProtocolDescriptor> = {
         provider: "openai",
         requestMode: "openai_chat",
     },
-    "claude-to-openai": {
-        protocol: "openai-chat",
-        provider: "openai",
-        requestMode: "openai_chat",
-    },
-    "gemini": {
-        protocol: "openai-chat",
-        provider: "openai",
-        requestMode: "openai_chat",
-    },
     "azure-openai": {
         protocol: "openai-chat",
         provider: "openai",
@@ -180,7 +170,7 @@ export const resolveUpstreamBase = (
     }
 
     return buildBaseResult(
-        buildPrefixedTargetUrl(endpoint, "/v1/chat/completions", "/v1", type),
+        buildPrefixedTargetUrl(endpoint, "/v1/chat/completions"),
         "/chat/completions",
     )
 }

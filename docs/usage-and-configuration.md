@@ -14,7 +14,7 @@ This document covers day-to-day usage, channel and token configuration, plus mon
 2. Sign in with the admin token
 3. Go to **Channels**
 4. Click **Add Channel**
-5. Choose a channel type (OpenAI, Gemini, Azure OpenAI, Claude, Claude to OpenAI, Responses, Audio)
+5. Choose a channel type (OpenAI, Gemini Native, Azure OpenAI, Claude, Responses, Audio)
 6. Fill in the channel identity and config (name, endpoint, API key, model mapping)
 7. Click **Save Channel**
 
@@ -167,6 +167,8 @@ Supported providers:
 
 #### OpenAI
 
+Any OpenAI-compatible upstream uses this type, including Gemini's OpenAI-compatible layer (set `endpoint` to `https://generativelanguage.googleapis.com/v1beta/openai/`).
+
 ```json
 {
   "name": "My OpenAI Channel",
@@ -176,23 +178,6 @@ Supported providers:
   "models": [
     { "id": "gpt-4o", "name": "gpt-4o", "enabled": true },
     { "id": "gpt-4o-mini", "name": "gpt-4o-mini", "enabled": true }
-  ]
-}
-```
-
-#### Gemini
-
-Gemini uses the official OpenAI-compatible layer. Prefer `endpoint` set to `https://generativelanguage.googleapis.com/v1beta/openai/`.
-
-```json
-{
-  "name": "My Gemini Channel",
-  "type": "gemini",
-  "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai/",
-  "api_keys": ["AIza-your-gemini-api-key"],
-  "models": [
-    { "id": "gemini-2.5-flash", "name": "gemini-2.5-flash", "enabled": true },
-    { "id": "gemini-2.5-pro", "name": "gemini-2.5-pro", "enabled": true }
   ]
 }
 ```
@@ -271,22 +256,6 @@ Azure channels target Azure OpenAI v1 (`/openai/v1/...`) directly from the resou
 }
 ```
 
-#### Claude to OpenAI
-
-An OpenAI-compatible chat channel. `/v1/messages` requests reach it through automatic protocol conversion, same as any other OpenAI chat channel:
-
-```json
-{
-  "name": "My Claude to OpenAI",
-  "type": "claude-to-openai",
-  "endpoint": "https://api.openai.com/v1/",
-  "api_keys": ["sk-your-openai-api-key"],
-  "models": [
-    { "id": "gpt-4o", "name": "claude-3-5-sonnet-20241022", "enabled": true }
-  ]
-}
-```
-
 #### OpenAI Audio (TTS)
 
 ```json
@@ -319,7 +288,7 @@ An OpenAI-compatible chat channel. `/v1/messages` requests reach it through auto
 Field notes:
 
 - `name`: display name
-- `type`: provider type — `openai`, `gemini`, `gemini-native`, `azure-openai`, `claude`, `claude-to-openai`, `openai-responses`, `azure-openai-responses`, `openai-audio`, `azure-openai-audio`
+- `type`: provider type — `openai`, `gemini-native`, `azure-openai`, `claude`, `openai-responses`, `azure-openai-responses`, `openai-audio`, `azure-openai-audio`
 - Protocol conversion: `/v1/chat/completions`, `/v1/messages`, `/v1/responses`, and `/v1beta/models/*` accept any text channel type. When client and channel protocols match, the request is forwarded verbatim, preserving body, native provider fields, images, and SSE frames. When they differ, requests and responses (including SSE) are converted automatically. Responses-only state (`previous_response_id`, conversations, prompts, native Responses tools) requires a Responses channel; multimodal content parts are not converted and need a same-protocol channel.
 - `endpoint`: API base URL (append `#` to bypass automatic path joining and use the exact URL, for raw passthrough and converted requests alike)
 - `enabled`: whether this channel participates in routing (defaults to `true`)

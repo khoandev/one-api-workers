@@ -14,7 +14,7 @@
 2. 使用管理员 Token 登录
 3. 进入 **渠道管理** 页面
 4. 点击 **添加渠道**
-5. 选择渠道类型（OpenAI、Gemini、Azure OpenAI、Claude、Claude to OpenAI、Responses、Audio）
+5. 选择渠道类型（OpenAI、Gemini Native、Azure OpenAI、Claude、Responses、Audio）
 6. 填写渠道标识和配置信息（名称、端点、API 密钥、模型映射）
 7. 点击 **保存渠道**
 
@@ -167,6 +167,8 @@ curl https://your-domain.com/v1/models \
 
 #### OpenAI
 
+所有 OpenAI 兼容上游均使用该类型，包括 Gemini 的 OpenAI 兼容层（将 `endpoint` 配置为 `https://generativelanguage.googleapis.com/v1beta/openai/` 即可）。
+
 ```json
 {
   "name": "My OpenAI Channel",
@@ -176,23 +178,6 @@ curl https://your-domain.com/v1/models \
   "models": [
     { "id": "gpt-4o", "name": "gpt-4o", "enabled": true },
     { "id": "gpt-4o-mini", "name": "gpt-4o-mini", "enabled": true }
-  ]
-}
-```
-
-#### Gemini
-
-Gemini 通过官方 OpenAI 兼容层接入，建议将 `endpoint` 配置为 `https://generativelanguage.googleapis.com/v1beta/openai/`。
-
-```json
-{
-  "name": "My Gemini Channel",
-  "type": "gemini",
-  "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai/",
-  "api_keys": ["AIza-your-gemini-api-key"],
-  "models": [
-    { "id": "gemini-2.5-flash", "name": "gemini-2.5-flash", "enabled": true },
-    { "id": "gemini-2.5-pro", "name": "gemini-2.5-pro", "enabled": true }
   ]
 }
 ```
@@ -271,22 +256,6 @@ Azure 渠道默认直接走资源主机的 Azure OpenAI v1 路径（`/openai/v1/
 }
 ```
 
-#### Claude to OpenAI
-
-OpenAI 兼容聊天渠道。`/v1/messages` 请求与其他 OpenAI 聊天渠道一样通过自动协议转换进入：
-
-```json
-{
-  "name": "My Claude to OpenAI",
-  "type": "claude-to-openai",
-  "endpoint": "https://api.openai.com/v1/",
-  "api_keys": ["sk-your-openai-api-key"],
-  "models": [
-    { "id": "gpt-4o", "name": "claude-3-5-sonnet-20241022", "enabled": true }
-  ]
-}
-```
-
 #### OpenAI Audio (TTS)
 
 ```json
@@ -319,7 +288,7 @@ OpenAI 兼容聊天渠道。`/v1/messages` 请求与其他 OpenAI 聊天渠道�
 渠道配置字段说明：
 
 - `name`：渠道显示名称
-- `type`：服务商类型，支持 `openai`、`gemini`、`gemini-native`、`azure-openai`、`claude`、`claude-to-openai`、`openai-responses`、`azure-openai-responses`、`openai-audio`、`azure-openai-audio`
+- `type`：服务商类型，支持 `openai`、`gemini-native`、`azure-openai`、`claude`、`openai-responses`、`azure-openai-responses`、`openai-audio`、`azure-openai-audio`
 - 协议转换：`/v1/chat/completions`、`/v1/messages`、`/v1/responses`、`/v1beta/models/*` 均接受任意文本渠道类型；客户端协议与渠道协议一致时原样转发，保留请求体、服务商原生字段、图片与 SSE 帧。协议不一致时，请求与响应（含 SSE 流）自动转换。仅 Responses 支持的字段（`previous_response_id`、会话、prompt、Responses 原生工具）需要 Responses 渠道；多模态内容不参与转换，需使用同协议渠道。
 - `endpoint`：API 端点地址（末尾加 `#` 可跳过自动路径拼接并原样请求该 URL，原样转发与协议转换均生效）
 - `enabled`：是否参与路由（默认 `true`）

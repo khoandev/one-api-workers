@@ -225,13 +225,6 @@ assert_not_contains "claude upstream strips client token value" "sk-mock-all" "$
 assert_not_contains "claude upstream strips cookie" "\"cookie\":" "$INSPECT"
 assert_not_contains "claude upstream strips x-forwarded-for" "\"x-forwarded-for\":" "$INSPECT"
 
-# ---- /v1/messages via claude-to-openai (non-stream) ----
-echo ""
-echo "--- POST /v1/messages (claude-to-openai, non-stream) ---"
-
-R=$(do_post -H "x-api-key: sk-mock-all" "$API/v1/messages" -H "Content-Type: application/json" -d '{"model":"claude-via-openai","max_tokens":100,"messages":[{"role":"user","content":"hi"}]}')
-assert_http "c2o non-stream → 200" "200" "message" "$R"
-
 # ---- /v1/responses errors ----
 echo ""
 echo "--- POST /v1/responses (errors) ---"
@@ -514,7 +507,7 @@ echo "========================================="
 # Cleanup test data
 echo ""
 echo "Cleaning up test data..."
-for key in test-openai test-azure test-claude test-c2o test-responses test-azure-resp test-gemini-native; do
+for key in test-openai test-azure test-claude test-responses test-azure-resp test-gemini-native test-exact test-audio test-azure-audio; do
   "${DB_EXEC[@]}" "DELETE FROM channel_config WHERE key = '$key'" > /dev/null 2>&1
 done
 for key in sk-mock-all sk-mock-openai sk-mock-quota; do

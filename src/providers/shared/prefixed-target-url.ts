@@ -10,27 +10,10 @@ const joinPath = (...segments: string[]): string => {
     return `/${cleanedSegments.join("/")}`;
 };
 
-const normalizeGeminiBasePath = (basePath: string): string => {
-    if (basePath.endsWith("v1beta/openai")) {
-        return basePath;
-    }
-
-    if (basePath.endsWith("v1beta")) {
-        return joinPath(basePath, "openai");
-    }
-
-    if (basePath.endsWith("openai")) {
-        return basePath;
-    }
-
-    return joinPath(basePath, "v1beta/openai");
-};
-
 export const buildPrefixedTargetUrl = (
     endpoint: string,
     requestPath: string,
     prefixToStrip = "/v1",
-    providerType?: string | null,
 ): URL => {
     const targetUrl = new URL(endpoint.replace(/#$/, ""));
 
@@ -39,13 +22,6 @@ export const buildPrefixedTargetUrl = (
     }
 
     const currentBasePath = trimSlashes(targetUrl.pathname);
-
-    if (providerType === "gemini") {
-        const geminiBasePath = normalizeGeminiBasePath(currentBasePath);
-        const normalizedRequestPath = requestPath.replace(/^\/v1(?=\/|$)/, "");
-        targetUrl.pathname = joinPath(geminiBasePath, normalizedRequestPath);
-        return targetUrl;
-    }
 
     const normalizedPrefix = trimSlashes(prefixToStrip);
     const baseAlreadyContainsPrefix = normalizedPrefix.length > 0
