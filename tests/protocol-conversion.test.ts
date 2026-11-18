@@ -7,6 +7,10 @@ import openaiProxy from "../src/providers/openai-proxy";
 import openaiResponsesProxy from "../src/providers/openai-responses-proxy";
 import protocolConversion from "../src/providers/protocol-conversion";
 import { getProvider } from "../src/providers/shared/provider-registry";
+import {
+    getUpstreamHeaderAllowlist,
+    resolveUpstreamBase,
+} from "../src/providers/shared/protocol-registry";
 import { isChannelAllowedForRoute } from "../src/providers/shared/route-policy";
 
 const restoreFetchers: Array<() => void> = [];
@@ -26,8 +30,11 @@ const mockUpstream = (handler: (request: Request) => Response | Promise<Response
     return fetchSpy;
 };
 
-const buildContext = (path: string) => {
-    return new Context<HonoCustomType>(new Request(`http://localhost${path}`, { method: "POST" }));
+const buildContext = (path: string, headers: Record<string, string> = {}) => {
+    return new Context<HonoCustomType>(new Request(`http://localhost${path}`, {
+        method: "POST",
+        headers,
+    }));
 };
 
 const collectUsage = () => {
@@ -43,11 +50,12 @@ const runProvider = async (
     type: ChannelType,
     config: Partial<ChannelConfig>,
     requestBody: unknown,
+    requestHeaders: Record<string, string> = {},
 ) => {
     const provider = getProvider(routeId, type || "");
     if (!provider) throw new Error(`Missing provider for ${type}`);
 
-    const context = buildContext(`/${routeId}`);
+    const context = buildContext(`/${routeId}`, requestHeaders);
     const { saved, saveUsage } = collectUsage();
     const trackingState: RequestTrackingState = { retryCount: 0 };
     const response = await provider(
@@ -1492,3 +1500,497 @@ test("chat stream tool call deltas are reassembled into tool_calls chunks", asyn
     expect(chunks.at(-1)?.choices?.[0]?.finish_reason).toBe("tool_calls");
     expect(saved).toEqual([{ prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 }]);
 });
+
+test("resolveUpstreamBase normalizes every channel endpoint form", () => {
+    expect(resolveUpstreamBase({
+        type: "gemini-native",
+        endpoint: "https://generativelanguage.googleapis.com",
+    })).toEqual({ baseUrl: "https://generativelanguage.googleapis.com/v1beta", query: {} });
+    expect(resolveUpstreamBase({
+        type: "gemini-native",
+        endpoint: "https://generativelanguage.googleapis.com/v1beta/",
+    }).baseUrl).toBe("https://generativelanguage.googleapis.com/v1beta");
+    expect(resolveUpstreamBase({
+        type: "gemini-native",
+        endpoint: "https://generativelanguage.googleapis.com/v1",
+    }).baseUrl).toBe("https://generativelanguage.googleapis.com/v1");
+
+    expect(resolveUpstreamBase({
+        type: "azure-openai",
+        endpoint: "https://r.openai.azure.com/",
+    }).baseUrl).toBe("https://r.openai.azure.com/openai/v1");
+    expect(resolveUpstreamBase({
+        type: "azure-openai",
+        endpoint: "https://r.openai.azure.com",
+    }).baseUrl).toBe("https://r.openai.azure.com/openai/v1");
+    expect(resolveUpstreamBase({
+        type: "azure-openai",
+        endpoint: "https://r.openai.azure.com/openai/v1/",
+    }).baseUrl).toBe("https://r.openai.azure.com/openai/v1");
+    expect(resolveUpstreamBase({
+        type: "azure-openai-responses",
+        endpoint: "https://r.openai.azure.com/",
+    }).baseUrl).toBe("https://r.openai.azure.com/openai/v1");
+    expect(resolveUpstreamBase({
+        type: "azure-openai-responses",
+        endpoint: "https://r.openai.azure.com/openai/v1",
+    }).baseUrl).toBe("https://r.openai.azure.com/openai/v1");
+
+    expect(resolveUpstreamBase({
+        type: "openai-responses",
+        endpoint: "https://api.openai.com",
+    }).baseUrl).toBe("https://api.openai.com/v1");
+    expect(resolveUpstreamBase({
+        type: "openai",
+        endpoint: "https://api.openai.com/v1/",
+    }).baseUrl).toBe("https://api.openai.com/v1");
+    expect(resolveUpstreamBase({
+        type: "claude",
+        endpoint: "https://api.anthropic.com",
+    }).baseUrl).toBe("https://api.anthropic.com/v1");
+    expect(resolveUpstreamBase({
+        type: "gemini",
+        endpoint: "https://generativelanguage.googleapis.com",
+    }).baseUrl).toBe("https://generativelanguage.googleapis.com/v1beta/openai");
+
+    expect(resolveUpstreamBase({
+        type: "gemini-native",
+        endpoint: "https://generativelanguage.googleapis.com?key=abc",
+    })).toEqual({
+        baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+        query: { key: "abc" },
+    });
+});
+
+test("upstream header allowlists follow the channel protocol", () => {
+    expect(getUpstreamHeaderAllowlist("anthropic-messages")).toEqual([
+        "accept",
+        "accept-encoding",
+        "anthropic-beta",
+        "content-type",
+        "idempotency-key",
+    ]);
+    expect(getUpstreamHeaderAllowlist("gemini-generate-content")).toEqual([
+        "accept",
+        "content-type",
+    ]);
+    expect(getUpstreamHeaderAllowlist("openai-chat")).toEqual([
+        "accept",
+        "accept-encoding",
+        "content-type",
+        "idempotency-key",
+        "openai-beta",
+    ]);
+    expect(getUpstreamHeaderAllowlist("openai-responses")).toEqual(
+        getUpstreamHeaderAllowlist("openai-chat"),
+    );
+});
+
+test("channel endpoint query params are forwarded to the upstream", async () => {
+    let upstreamRequest: Request | undefined;
+    mockUpstream((request) => {
+        upstreamRequest = request;
+        return jsonResponse(chatCompletion("query"));
+    });
+
+    await runProvider("messages", "azure-openai", {
+        endpoint: "https://r.openai.azure.com/openai/v1?api-version=2024-10-21",
+        api_key: "k",
+    }, {
+        model: "gpt-4o",
+        max_tokens: 64,
+        messages: [{ role: "user", content: "hello" }],
+    });
+
+    expect(upstreamRequest?.url).toBe(
+        "https://r.openai.azure.com/openai/v1/chat/completions?api-version=2024-10-21"
+    );
+});
+
+test("client headers are limited to the upstream protocol allowlist", async () => {
+    let upstreamRequest: Request | undefined;
+    mockUpstream((request) => {
+        upstreamRequest = request;
+        return jsonResponse(anthropicMessage("headers"));
+    });
+
+    await runProvider("messages", "claude", {
+        endpoint: "https://api.anthropic.com",
+        api_key: "k",
+    }, {
+        model: "claude-3-opus",
+        max_tokens: 64,
+        messages: [{ role: "user", content: "hello" }],
+    }, {
+        "anthropic-beta": "prompt-caching-2024-07-31",
+        "x-custom-secret": "leak",
+    });
+
+    expect(upstreamRequest?.headers.get("anthropic-beta")).toBe("prompt-caching-2024-07-31");
+    expect(upstreamRequest?.headers.get("x-custom-secret")).toBeNull();
+});
+
+test("chat image parts are rejected for converted channels", async () => {
+    const fetchSpy = mockUpstream(() => jsonResponse(anthropicMessage("nope")));
+
+    const { response } = await runProvider("chat-completions", "claude", {
+        endpoint: "https://api.anthropic.com",
+        api_key: "k",
+    }, {
+        model: "claude-3-opus",
+        messages: [{
+            role: "user",
+            content: [
+                { type: "text", text: "describe" },
+                { type: "image_url", image_url: { url: "https://example.com/cat.png" } },
+            ],
+        }],
+    });
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(response.status).toBe(400);
+    const body = await response.json() as Record<string, any>;
+    expect(body.error.code).toBe("request_invalid_payload");
+    expect(body.error.message).toBe("Invalid openai-chat request payload");
+});
+
+const responsesOnlyFieldCases: Array<[string, Record<string, unknown>]> = [
+    ["conversation", { conversation: "conv_1" }],
+    ["prompt", { prompt: { id: "pmpt_1" } }],
+    ["truncation", { truncation: "auto" }],
+    ["text.verbosity", { text: { verbosity: "low" } }],
+    ["include", { include: ["message.output_text.logprobs"], top_logprobs: 2 }],
+    ["reasoning.summary", { reasoning: { summary: "auto" } }],
+];
+
+for (const [label, extra] of responsesOnlyFieldCases) {
+    test(`responses field ${label} is rejected before conversion`, async () => {
+        const fetchSpy = mockUpstream(() => jsonResponse(chatCompletion("nope")));
+
+        const { response } = await runProvider("responses", "openai", {
+            endpoint: "https://upstream.example",
+            api_key: "k",
+        }, {
+            model: "gpt-4o",
+            input: "hi",
+            ...extra,
+        });
+
+        expect(fetchSpy).not.toHaveBeenCalled();
+        expect(response.status).toBe(400);
+        const body = await response.json() as Record<string, any>;
+        expect(body.error.code).toBe("request_unsupported_openai_semantics");
+        expect(body.error.message).toBe(`"${label}" requires an OpenAI Responses compatible channel`);
+    });
+}
+
+const nativeToolCases = ["web_search", "image_generation", "custom"] as const;
+
+for (const nativeTool of nativeToolCases) {
+    test(`responses native tool ${nativeTool} is rejected for chat upstreams`, async () => {
+        const fetchSpy = mockUpstream(() => jsonResponse(chatCompletion("nope")));
+        const tool = nativeTool === "custom"
+            ? { type: "custom", name: "shell", description: "run a command", format: { type: "text" } }
+            : { type: nativeTool };
+
+        const { response } = await runProvider("responses", "openai", {
+            endpoint: "https://upstream.example",
+            api_key: "k",
+        }, {
+            model: "gpt-4o",
+            input: "hi",
+            tools: [tool],
+        });
+
+        expect(fetchSpy).not.toHaveBeenCalled();
+        expect(response.status).toBe(400);
+        const body = await response.json() as Record<string, any>;
+        expect(body.error.code).toBe("request_unsupported_openai_semantics");
+    });
+}
+
+const conversionStreamCases: Array<{
+    label: string;
+    routeId: Exclude<RouteId, "audio-speech">;
+    type: ChannelType;
+    endpoint: string;
+    upstream: string;
+    request: Record<string, unknown>;
+    assertRequest: (request: Request) => void;
+}> = [
+    {
+        label: "messages to azure openai",
+        routeId: "messages",
+        type: "azure-openai",
+        endpoint: "https://r.openai.azure.com/openai/v1",
+        upstream: chatSse(["hel", "lo"]),
+        request: {
+            model: "gpt-4o",
+            max_tokens: 64,
+            stream: true,
+            messages: [{ role: "user", content: "hello" }],
+        },
+        assertRequest: (request) => {
+            expect(request.url).toBe("https://r.openai.azure.com/openai/v1/chat/completions");
+            expect(request.headers.get("api-key")).toBe("k");
+        },
+    },
+    {
+        label: "messages to azure openai responses",
+        routeId: "messages",
+        type: "azure-openai-responses",
+        endpoint: "https://r.openai.azure.com/",
+        upstream: responsesSse(["hel", "lo"]),
+        request: {
+            model: "gpt-4.1-mini",
+            max_tokens: 64,
+            stream: true,
+            messages: [{ role: "user", content: "hello" }],
+        },
+        assertRequest: (request) => {
+            expect(request.url).toBe("https://r.openai.azure.com/openai/v1/responses");
+            expect(request.headers.get("api-key")).toBe("k");
+        },
+    },
+    {
+        label: "messages to gemini",
+        routeId: "messages",
+        type: "gemini",
+        endpoint: "https://generativelanguage.googleapis.com",
+        upstream: chatSse(["hel", "lo"]),
+        request: {
+            model: "gemini-2.0-flash",
+            max_tokens: 64,
+            stream: true,
+            messages: [{ role: "user", content: "hello" }],
+        },
+        assertRequest: (request) => {
+            expect(request.url).toBe(
+                "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+            );
+        },
+    },
+    {
+        label: "messages to claude-to-openai",
+        routeId: "messages",
+        type: "claude-to-openai",
+        endpoint: "https://upstream.example",
+        upstream: chatSse(["hel", "lo"]),
+        request: {
+            model: "gpt-4o",
+            max_tokens: 64,
+            stream: true,
+            messages: [{ role: "user", content: "hello" }],
+        },
+        assertRequest: (request) => {
+            expect(request.url).toBe("https://upstream.example/v1/chat/completions");
+        },
+    },
+    {
+        label: "chat to azure openai responses",
+        routeId: "chat-completions",
+        type: "azure-openai-responses",
+        endpoint: "https://r.openai.azure.com/",
+        upstream: responsesSse(["hel", "lo"]),
+        request: {
+            model: "gpt-4.1-mini",
+            stream: true,
+            messages: [{ role: "user", content: "hello" }],
+        },
+        assertRequest: (request) => {
+            expect(request.url).toBe("https://r.openai.azure.com/openai/v1/responses");
+            expect(request.headers.get("api-key")).toBe("k");
+        },
+    },
+    {
+        label: "responses to azure openai",
+        routeId: "responses",
+        type: "azure-openai",
+        endpoint: "https://r.openai.azure.com/",
+        upstream: chatSse(["hel", "lo"]),
+        request: { model: "gpt-4o", stream: true, input: "hi" },
+        assertRequest: (request) => {
+            expect(request.url).toBe("https://r.openai.azure.com/openai/v1/chat/completions");
+            expect(request.headers.get("api-key")).toBe("k");
+        },
+    },
+    {
+        label: "responses to gemini",
+        routeId: "responses",
+        type: "gemini",
+        endpoint: "https://generativelanguage.googleapis.com",
+        upstream: chatSse(["hel", "lo"]),
+        request: { model: "gemini-2.0-flash", stream: true, input: "hi" },
+        assertRequest: (request) => {
+            expect(request.url).toBe(
+                "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+            );
+        },
+    },
+    {
+        label: "responses to claude-to-openai",
+        routeId: "responses",
+        type: "claude-to-openai",
+        endpoint: "https://upstream.example",
+        upstream: chatSse(["hel", "lo"]),
+        request: { model: "gpt-4o", stream: true, input: "hi" },
+        assertRequest: (request) => {
+            expect(request.url).toBe("https://upstream.example/v1/chat/completions");
+        },
+    },
+];
+
+const streamOutputExpectations: Record<
+    Exclude<RouteId, "audio-speech">,
+    { contains: string[]; excludes: string[] }
+> = {
+    "chat-completions": {
+        contains: ['"content":"hel"', "data: [DONE]"],
+        excludes: [],
+    },
+    "messages": {
+        contains: ["event: message_start", "event: content_block_delta", "event: message_stop"],
+        excludes: ["[DONE]"],
+    },
+    "responses": {
+        contains: [
+            "event: response.output_text.delta",
+            "event: response.completed",
+            "data: [DONE]",
+        ],
+        excludes: [],
+    },
+};
+
+for (const streamCase of conversionStreamCases) {
+    test(`stream conversion: ${streamCase.label}`, async () => {
+        let upstreamRequest: Request | undefined;
+        mockUpstream((request) => {
+            upstreamRequest = request;
+            return sseResponse(streamCase.upstream);
+        });
+
+        const { response, saved } = await runProvider(
+            streamCase.routeId,
+            streamCase.type,
+            { endpoint: streamCase.endpoint, api_key: "k" },
+            streamCase.request,
+        );
+
+        expect(response.headers.get("content-type")).toBe("text/event-stream; charset=utf-8");
+        expect(response.headers.get("cache-control")).toBe("no-cache");
+        expect(response.headers.get("connection")).toBe("keep-alive");
+
+        streamCase.assertRequest(upstreamRequest!);
+
+        const text = await response.text();
+        for (const marker of streamOutputExpectations[streamCase.routeId].contains) {
+            expect(text).toContain(marker);
+        }
+        for (const marker of streamOutputExpectations[streamCase.routeId].excludes) {
+            expect(text).not.toContain(marker);
+        }
+        expect(saved.length).toBe(1);
+    });
+}
+
+test("responses to azure openai converts the response object", async () => {
+    mockUpstream(() => jsonResponse(chatCompletion("azure chat")));
+
+    const { response } = await runProvider("responses", "azure-openai", {
+        endpoint: "https://r.openai.azure.com/",
+        api_key: "k",
+    }, {
+        model: "gpt-4o",
+        input: "hi",
+    });
+
+    const body = await response.json() as Record<string, any>;
+    expect(body.object).toBe("response");
+    expect(body.output_text).toBe("azure chat");
+});
+
+test("responses to claude-to-openai converts the response object", async () => {
+    mockUpstream(() => jsonResponse(chatCompletion("c2o chat")));
+
+    const { response } = await runProvider("responses", "claude-to-openai", {
+        endpoint: "https://upstream.example",
+        api_key: "k",
+    }, {
+        model: "gpt-4o",
+        input: "hi",
+    });
+
+    const body = await response.json() as Record<string, any>;
+    expect(body.object).toBe("response");
+    expect(body.output_text).toBe("c2o chat");
+});
+
+const upstreamErrorCases: Array<{
+    routeId: Exclude<RouteId, "audio-speech">;
+    type: ChannelType;
+    endpoint: string;
+    request: Record<string, unknown>;
+    status: number;
+    expectedType: string;
+}> = [
+    {
+        routeId: "chat-completions",
+        type: "claude",
+        endpoint: "https://api.anthropic.com",
+        request: { model: "claude-3-opus", messages: [{ role: "user", content: "hello" }] },
+        status: 500,
+        expectedType: "server_error",
+    },
+    {
+        routeId: "messages",
+        type: "openai",
+        endpoint: "https://upstream.example",
+        request: {
+            model: "gpt-4o",
+            max_tokens: 64,
+            messages: [{ role: "user", content: "hello" }],
+        },
+        status: 401,
+        expectedType: "authentication_error",
+    },
+    {
+        routeId: "responses",
+        type: "claude",
+        endpoint: "https://api.anthropic.com",
+        request: { model: "claude-3-opus", input: "hi" },
+        status: 404,
+        expectedType: "not_found_error",
+    },
+];
+
+for (const errorCase of upstreamErrorCases) {
+    test(`upstream ${errorCase.status} maps to a ${errorCase.expectedType}`, async () => {
+        mockUpstream(() => new Response(JSON.stringify({
+            error: { message: "upstream failed" },
+        }), {
+            status: errorCase.status,
+            headers: { "content-type": "application/json" },
+        }));
+
+        const { response, trackingState } = await runProvider(
+            errorCase.routeId,
+            errorCase.type,
+            { endpoint: errorCase.endpoint, api_key: "k" },
+            errorCase.request,
+        );
+
+        expect(response.status).toBe(errorCase.status);
+        expect(trackingState.upstreamStatus).toBe(errorCase.status);
+
+        const body = await response.json() as Record<string, any>;
+        if (errorCase.routeId === "messages") {
+            expect(body.type).toBe("error");
+            expect(body.error.type).toBe(errorCase.expectedType);
+        } else {
+            expect(body.error.type).toBe(errorCase.expectedType);
+            expect(body.error.code).toBe("provider_upstream_error");
+        }
+        expect(body.error.message).toBe("upstream failed");
+    });
+}
