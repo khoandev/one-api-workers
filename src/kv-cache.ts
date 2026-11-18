@@ -15,28 +15,31 @@ type KvCacheEnvelope<T> = {
     value: T;
 };
 
+type KvLookup<T> = { hit: true; value: T } | { hit: false };
+
 export const getKvCacheKey = (key: string): string =>
     `oaw:cache:${KV_CACHE_VERSION}:${key}`;
 
+// `null` is a cacheable loader result (absent settings), so a miss needs its own marker.
 const readEnvelope = async <T>(
     kv: KVNamespace,
     kvKey: string,
     maxAgeMs: number,
-): Promise<T | null> => {
+): Promise<KvLookup<T>> => {
     const raw = await kv.get(kvKey);
     if (!raw) {
-        return null;
+        return { hit: false };
     }
 
     const envelope = JSON.parse(raw) as KvCacheEnvelope<T>;
     if (typeof envelope?.cachedAt !== "number") {
-        return null;
+        return { hit: false };
     }
     if (Date.now() - envelope.cachedAt >= maxAgeMs) {
-        return null;
+        return { hit: false };
     }
 
-    return envelope.value;
+    return { hit: true, value: envelope.value };
 };
 
 const scheduleWrite = async (
@@ -85,9 +88,9 @@ export const cachedKvValue = <T>(
 
             const kvKey = getKvCacheKey(key);
             try {
-                const cached = await readEnvelope<T>(kv, kvKey, maxAgeMs);
-                if (cached !== null) {
-                    return cached;
+                const lookup = await readEnvelope<T>(kv, kvKey, maxAgeMs);
+                if (lookup.hit) {
+                    return lookup.value;
                 }
             } catch (error) {
                 console.warn(`KvCache: Failed to read ${kvKey}`, error);

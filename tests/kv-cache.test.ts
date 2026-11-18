@@ -104,6 +104,34 @@ test("KV read failures, corrupt payloads, and write failures all fall back to th
     }
 });
 
+test("a null loader value is cached instead of being mistaken for a miss", async () => {
+    const kv = createFakeKv();
+    const first = createTestDatabase();
+    const second = createTestDatabase();
+    attachKv(first, kv);
+    attachKv(second, kv);
+
+    let loads = 0;
+    const loader = async () => {
+        loads += 1;
+        return null;
+    };
+
+    try {
+        expect(await cachedKvValue(first.context, KEY, 60_000, loader)).toBeNull();
+        expect(loads).toBe(1);
+        expect(JSON.parse(kv.store.get(KV_KEY) as string)).toMatchObject({
+            value: null,
+        });
+
+        expect(await cachedKvValue(second.context, KEY, 60_000, loader)).toBeNull();
+        expect(loads).toBe(1);
+    } finally {
+        first.close();
+        second.close();
+    }
+});
+
 test("without a KV binding the isolate cache is the only layer", async () => {
     const fixture = createTestDatabase();
     let loads = 0;
