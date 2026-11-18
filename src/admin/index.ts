@@ -9,7 +9,7 @@ import {
     TokenListEndpoint, TokenUpsertEndpoint, TokenDeleteEndpoint, TokenResetUsageEndpoint
 } from "./token_api"
 import {
-    PricingGetEndpoint, PricingUpdateEndpoint
+    PricingGetEndpoint, PricingUpdateEndpoint, PricingSyncPreviewEndpoint
 } from "./pricing_api"
 import {
     BillingConfigGetEndpoint, BillingConfigUpdateEndpoint
@@ -109,6 +109,7 @@ api.delete("/api/admin/token/:key", TokenDeleteEndpoint)
 // Pricing management routes
 api.get("/api/admin/pricing", PricingGetEndpoint)
 api.post("/api/admin/pricing", PricingUpdateEndpoint)
+api.post("/api/admin/pricing/sync", PricingSyncPreviewEndpoint)
 api.get("/api/admin/billing/config", BillingConfigGetEndpoint)
 api.post("/api/admin/billing/config", BillingConfigUpdateEndpoint)
 api.get("/api/admin/system/config", SystemConfigGetEndpoint)

@@ -9,6 +9,7 @@ import {
   AnalyticsBreakdownDimension,
   AnalyticsRange,
   BillingConfig,
+  PricingSyncPreview,
   SystemConfig,
   AdminLoginResponse,
   UsageLogFilters,
@@ -247,6 +248,9 @@ export const apiClient = {
       method: 'POST',
       body: JSON.stringify(config),
     }),
+
+  previewPricingSync: () =>
+    request<ApiResponse<PricingSyncPreview>>('/api/admin/pricing/sync', { method: 'POST' }),
 
   getBillingConfig: () => request<ApiResponse<BillingConfig>>('/api/admin/billing/config', { method: 'GET' }),
 

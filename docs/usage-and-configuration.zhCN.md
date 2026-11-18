@@ -149,7 +149,7 @@ curl https://your-domain.com/v1/models \
 
 - 渠道管理：添加、编辑、删除 AI 服务商
 - API Token 管理：生成、管理和监控 API Token 使用情况
-- 定价配置：灵活配置不同模型的定价策略
+- 定价配置：灵活配置不同模型的定价策略，并支持从 [models.dev](https://models.dev) 一键同步
 - API 测试工具：内置测试界面，支持实时调试和错误排查
 
 管理界面特性：

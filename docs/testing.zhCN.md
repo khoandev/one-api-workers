@@ -30,6 +30,7 @@ Provider 分发测试按行为拆分：
 - `tests/gemini-inbound.test.ts`：`/v1beta/models/*` 解析、`x-goog-api-key` / `?key=` 鉴权、转换到 chat/Claude/Responses 渠道、流式输出、Gemini 错误结构
 - `tests/chat-stream-usage.test.ts`：流式用量估算与权威用量
 - `tests/app-routing.test.ts`：以内存 SQLite 的 D1 shim 直接调用真实 Hono app——路由注册、数据库中间件、CORS 预检、`?key=` 作用范围、API 404，无需 workerd
+- `tests/pricing-sync.test.ts`：models.dev 索引构建、供应商优先级排序、仅填充/覆盖合并，以及 `POST /api/admin/pricing/sync` 预览路由
 
 ## 本地 E2E
 

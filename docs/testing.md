@@ -30,6 +30,7 @@ Provider dispatch tests are split by behavior:
 - `tests/gemini-inbound.test.ts`: `/v1beta/models/*` parsing, `x-goog-api-key` / `?key=` authentication, conversion to chat/Claude/Responses channels, streaming, Gemini error shapes
 - `tests/chat-stream-usage.test.ts`: stream usage estimation and authoritative usage
 - `tests/app-routing.test.ts`: the real Hono app dispatched over an in-memory SQLite D1 shim — route registration, database middleware, CORS preflight, `?key=` scoping, and API 404s without workerd
+- `tests/pricing-sync.test.ts`: models.dev index building, provider preference ranking, fill-only/overwrite merges, and the `POST /api/admin/pricing/sync` preview route
 
 ## Local E2E
 

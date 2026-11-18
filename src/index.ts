@@ -1,5 +1,4 @@
-import type { Context } from 'hono'
-import { Hono } from 'hono'
+import { Context, Hono } from 'hono'
 import { cors } from 'hono/cors';
 import { api as providerApi } from './providers'
 import { api as adminApi } from './admin'
@@ -7,6 +6,7 @@ import { fromHono } from 'chanfana';
 import db from './db';
 import { getSystemConfig } from './system-config';
 import { resolveLanguage } from './i18n';
+import { runScheduledPricingSync } from './pricing-sync';
 
 const FRONTEND_ENTRY = '/'
 const FRONTEND_STATIC_PATHS = new Set([
@@ -172,4 +172,18 @@ openapi.onError((err, c) => {
 openapi.route('/', providerApi)
 openapi.route('/', adminApi)
 
-export default app
+const scheduled: ExportedHandlerScheduledHandler<CloudflareBindings> = async (_controller, env, ctx) => {
+  const context = new Context<HonoCustomType>(
+    new Request("https://pricing-sync.internal/"),
+    { env, executionCtx: ctx },
+  );
+
+  try {
+    await db.ensureReady(context);
+    console.log("Scheduled pricing sync", await runScheduledPricingSync(context));
+  } catch (error) {
+    console.error("Scheduled pricing sync failed", error);
+  }
+};
+
+export default { fetch: app.fetch, scheduled } satisfies ExportedHandler<CloudflareBindings>

@@ -4,6 +4,8 @@ import { z } from 'zod';
 import { getJsonSetting, saveSetting } from "../utils";
 import { CONSTANTS } from "../constants";
 import { CommonErrorResponse, CommonSuccessfulResponse } from "../model";
+import { sanitizePricingConfig } from "../pricing-config";
+import { buildPricingSyncPreview } from "../pricing-sync";
 
 const pricingBillingModeSchema = z.enum(["volume", "request"]);
 
@@ -14,88 +16,6 @@ const pricingModelSchema = z.object({
     cache: z.number().optional(),
     request: z.number().optional(),
 });
-
-const toPositiveNumber = (value: unknown): number | undefined => {
-    if (typeof value !== "number" || !Number.isFinite(value)) {
-        return undefined;
-    }
-
-    return value > 0 ? value : undefined;
-};
-
-const normalizeBillingMode = (value: unknown): PricingBillingMode | undefined => {
-    if (value === "volume" || value === "request") {
-        return value;
-    }
-
-    return undefined;
-};
-
-const sanitizePricingConfig = (
-    config: Record<string, Partial<ModelPricing>> | null | undefined
-): Record<string, Partial<ModelPricing>> => {
-    if (!config || typeof config !== "object") {
-        return {};
-    }
-
-    const normalizedEntries: Array<[string, Partial<ModelPricing>]> = [];
-
-    Object.entries(config).forEach(([model, pricing]) => {
-        const normalizedModel = model.trim();
-        if (!normalizedModel || !pricing || typeof pricing !== "object") {
-            return;
-        }
-
-        const normalizedPricing: Partial<ModelPricing> = {};
-        const input = toPositiveNumber(pricing.input);
-        const output = toPositiveNumber(pricing.output);
-        const cache = toPositiveNumber(pricing.cache);
-        const request = toPositiveNumber(pricing.request);
-        const billingMode = normalizeBillingMode(pricing.billingMode);
-        const hasVisiblePricing = input !== undefined || output !== undefined || cache !== undefined;
-        const isRequestMode = billingMode === "request";
-
-        // 旧版仅配置了 request 的场景，直接迁移为新版按次计费。
-        if (!billingMode && request !== undefined && !hasVisiblePricing) {
-            normalizedEntries.push([
-                normalizedModel,
-                {
-                    billingMode: "request",
-                    input: request,
-                },
-            ]);
-            return;
-        }
-
-        if (input !== undefined) {
-            normalizedPricing.input = input;
-        }
-        if (output !== undefined) {
-            normalizedPricing.output = output;
-        }
-        if (cache !== undefined) {
-            normalizedPricing.cache = cache;
-        }
-
-        // 只有旧版未声明 billingMode 的配置才保留 request，
-        // 避免和新版按量/按次模式混用。
-        if (!billingMode && request !== undefined) {
-            normalizedPricing.request = request;
-        }
-
-        if ((isRequestMode || hasVisiblePricing) && (!normalizedPricing.request || billingMode)) {
-            normalizedPricing.billingMode = billingMode || "volume";
-        }
-
-        if (Object.keys(normalizedPricing).length === 0) {
-            return;
-        }
-
-        normalizedEntries.push([normalizedModel, normalizedPricing]);
-    });
-
-    return Object.fromEntries(normalizedEntries);
-};
 
 // Pricing 获取配置 API
 export class PricingGetEndpoint extends OpenAPIRoute {
@@ -118,6 +38,41 @@ export class PricingGetEndpoint extends OpenAPIRoute {
             success: true,
             data: sanitizePricingConfig(pricingConfig)
         } as CommonResponse;
+    }
+}
+
+// Pricing 预览 models.dev 同步建议 API
+export class PricingSyncPreviewEndpoint extends OpenAPIRoute {
+    schema = {
+        tags: ['Admin API'],
+        summary: 'Preview pricing suggestions from models.dev',
+        responses: {
+            ...CommonSuccessfulResponse(z.object({
+                suggestions: z.record(z.string(), z.object({
+                    input: z.number(),
+                    output: z.number(),
+                    cache: z.number().optional(),
+                    provider: z.string(),
+                })),
+                unmatched: z.array(z.string()),
+                targetCount: z.number(),
+                providerCount: z.number(),
+                fetchedAt: z.string(),
+            })),
+            ...CommonErrorResponse,
+        },
+    };
+
+    async handle(c: Context<HonoCustomType>) {
+        try {
+            return {
+                success: true,
+                data: await buildPricingSyncPreview(c),
+            } as CommonResponse;
+        } catch (error) {
+            const message = error instanceof Error ? error.message : "Failed to fetch models.dev pricing";
+            return c.text(message, 502);
+        }
     }
 }
 

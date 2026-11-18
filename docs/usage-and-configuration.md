@@ -149,7 +149,7 @@ Open `https://your-domain.com` for the web console:
 
 - Channel management: add, edit, and remove AI providers
 - API token management: create, manage, and monitor token usage
-- Pricing: flexible per-model pricing strategies
+- Pricing: flexible per-model pricing strategies, plus one-click sync from [models.dev](https://models.dev)
 - API Test: built-in tester for live debugging
 
 UI highlights:

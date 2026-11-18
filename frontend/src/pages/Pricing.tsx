@@ -1,13 +1,22 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/api/client";
-import { Channel, PricingBillingMode, PricingConfig, PricingModel, Token } from "@/types";
+import { Channel, PricingBillingMode, PricingConfig, PricingModel, PricingSyncPreview, Token } from "@/types";
 import { MultiSelectAutoCompleteInput, type AutoCompleteOption } from "@/components/ui/autocomplete";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/components/ui/use-toast";
 import {
   getChannelModels,
@@ -17,7 +26,7 @@ import {
   parseTokenConfig,
 } from "@/lib/channel-models";
 import { cn } from "@/lib/utils";
-import { Check, FileJson, FileText, RefreshCw, Search } from "lucide-react";
+import { Check, Download, FileJson, FileText, RefreshCw, Search } from "lucide-react";
 import { PageContainer } from "@/components/ui/page-container";
 import { useTranslation } from "react-i18next";
 import i18n from "@/i18n";
@@ -340,6 +349,15 @@ const isCustomPricingRow = (row: PricingRow): boolean => {
   return row.billingMode === "request" || row.input > 0 || row.output > 0 || row.cache > 0 || row.legacyRequest > 0;
 };
 
+const hasConfiguredPricing = (pricing?: Partial<PricingModel> | null): boolean =>
+  Boolean(pricing) && (
+    normalizePricingNumber(pricing?.input, 0) > 0
+    || normalizePricingNumber(pricing?.output, 0) > 0
+    || normalizePricingNumber(pricing?.cache, 0) > 0
+    || normalizePricingNumber(pricing?.request, 0) > 0
+    || pricing?.billingMode === "request"
+  );
+
 type MultiSelectAutocompleteFieldProps = {
   label: string;
   placeholder: string;
@@ -422,6 +440,9 @@ export function Pricing() {
   const [selectedBillingModes, setSelectedBillingModes] = useState<string[]>([]);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const [syncDialogOpen, setSyncDialogOpen] = useState(false);
+  const [syncPreview, setSyncPreview] = useState<PricingSyncPreview | null>(null);
+  const [syncOverwrite, setSyncOverwrite] = useState(false);
 
   const deferredSearchQuery = useDeferredValue(searchQuery);
   const { addToast } = useToast();
@@ -532,6 +553,18 @@ export function Pricing() {
       if (variables.source === "manual") {
         addToast(t('common.saveFailed', { message: error.message }), "error");
       }
+    },
+  });
+
+  const syncPreviewMutation = useMutation({
+    mutationFn: async () => apiClient.previewPricingSync(),
+    onSuccess: (response) => {
+      setSyncPreview((response.data as PricingSyncPreview | undefined) ?? null);
+      setSyncOverwrite(false);
+      setSyncDialogOpen(true);
+    },
+    onError: (error: Error) => {
+      addToast(t('pricing.syncFailed', { message: error.message }), "error");
     },
   });
 
@@ -691,6 +724,50 @@ export function Pricing() {
     return currentPricingConfig ? JSON.stringify(currentPricingConfig) : null;
   }, [currentPricingConfig]);
 
+  const syncBaseConfig = useMemo(() => {
+    return editMode === "cards" ? buildConfigFromRows(pricingRows) : normalizedJsonConfig;
+  }, [editMode, normalizedJsonConfig, pricingRows]);
+
+  const syncPreviewRows = useMemo(() => {
+    if (!syncPreview) {
+      return [];
+    }
+
+    return Object.entries(syncPreview.suggestions)
+      .map(([model, next]) => {
+        const current = syncBaseConfig?.[model];
+        return {
+          model,
+          current,
+          next,
+          hasExisting: hasConfiguredPricing(current),
+        };
+      })
+      .filter((row) => !row.hasExisting || syncOverwrite)
+      .sort((left, right) => left.model.localeCompare(right.model, "zh-CN"));
+  }, [syncBaseConfig, syncOverwrite, syncPreview]);
+
+  const formatSyncPricing = (
+    pricing: Pick<Partial<PricingRow>, "billingMode" | "input" | "output" | "cache">,
+  ): string => {
+    if (pricing.billingMode === "request") {
+      return t('pricing.estimatedCostRequest', {
+        cost: normalizePricingNumber(pricing.input, 0).toFixed(PRICING_DECIMALS),
+      });
+    }
+
+    const formatValue = (value: number | undefined) => {
+      const normalized = normalizePricingNumber(value, 0);
+      return normalized > 0 ? normalized.toFixed(PRICING_DECIMALS) : t('pricing.syncEmptyValue');
+    };
+
+    return [
+      formatValue(pricing.input),
+      formatValue(pricing.output),
+      formatValue(pricing.cache),
+    ].join(" / ");
+  };
+
   useEffect(() => {
     if (!hasHydratedRef.current) {
       return;
@@ -762,6 +839,59 @@ export function Pricing() {
     }
   };
 
+  const handleApplySync = () => {
+    if (!syncBaseConfig) {
+      addToast(t('common.jsonFormatError'), "error");
+      return;
+    }
+
+    if (syncPreviewRows.length === 0) {
+      setSyncDialogOpen(false);
+      addToast(t('pricing.syncNoChanges'), "info");
+      return;
+    }
+
+    const nextConfig: PricingConfig = { ...syncBaseConfig };
+    syncPreviewRows.forEach((row) => {
+      const entry: Partial<PricingModel> = { billingMode: "volume" };
+      const input = normalizePricingNumber(row.next.input, 0);
+      const output = normalizePricingNumber(row.next.output, 0);
+      const cache = normalizePricingNumber(row.next.cache, 0);
+
+      if (input > 0) {
+        entry.input = input;
+      }
+      if (output > 0) {
+        entry.output = output;
+      }
+      if (cache > 0) {
+        entry.cache = cache;
+      }
+
+      nextConfig[row.model] = entry;
+    });
+
+    const sanitized = normalizePricingConfig(nextConfig);
+    let configToSave = sanitized;
+
+    if (editMode === "cards") {
+      const nextRows = buildPricingRows(modelChannelMap, sanitized, { sortConfiguredFirst: true });
+      setPricingRows(nextRows);
+      configToSave = buildConfigFromRows(nextRows);
+    } else {
+      setJsonValue(JSON.stringify(sanitized, null, 2));
+    }
+
+    saveMutation.mutate({
+      config: configToSave,
+      source: "manual",
+      signature: JSON.stringify(configToSave),
+    });
+
+    setSyncDialogOpen(false);
+    addToast(t('pricing.syncApplied', { count: syncPreviewRows.length }), "success");
+  };
+
   const toggleEditMode = () => {
     if (editMode === "cards") {
       setJsonValue(JSON.stringify(buildConfigFromRows(pricingRows), null, 2));
@@ -829,6 +959,15 @@ export function Pricing() {
       actions={
         <div className="flex items-center gap-2">
           <span className="hidden text-xs text-muted-foreground md:inline">{saveHint}</span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => syncPreviewMutation.mutate()}
+            disabled={syncPreviewMutation.isPending}
+          >
+            <Download className={cn("h-4 w-4", syncPreviewMutation.isPending && "animate-pulse")} />
+            <span className="hidden sm:inline ml-1">{t('pricing.syncFromModelsDev')}</span>
+          </Button>
           <Button variant="outline" size="sm" onClick={handleRefresh} disabled={isFetching}>
             <RefreshCw className={cn("h-4 w-4", isFetching && "animate-spin")} />
           </Button>
@@ -1070,6 +1209,88 @@ export function Pricing() {
           </Card>
         )}
       </div>
+
+      <Dialog open={syncDialogOpen} onOpenChange={setSyncDialogOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{t('pricing.syncDialogTitle')}</DialogTitle>
+            <DialogDescription>
+              {t('pricing.syncDialogDescription', {
+                providers: syncPreview?.providerCount ?? 0,
+                targets: syncPreview?.targetCount ?? 0,
+                matched: Object.keys(syncPreview?.suggestions || {}).length,
+                unmatched: syncPreview?.unmatched.length ?? 0,
+              })}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2 text-xs text-muted-foreground">
+            <p>{t('pricing.syncCronNote')}</p>
+            {(syncPreview?.unmatched.length ?? 0) > 0 && (
+              <p>
+                {t('pricing.syncUnmatchedList', {
+                  models: (syncPreview?.unmatched ?? []).slice(0, 10).join(", "),
+                })}
+              </p>
+            )}
+          </div>
+
+          {syncPreviewRows.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">{t('pricing.syncNothing')}</p>
+          ) : (
+            <div className="max-h-[50vh] overflow-y-auto rounded-md border">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-background">
+                  <tr className="text-left text-xs uppercase tracking-wide text-muted-foreground">
+                    <th className="px-3 py-2 font-medium">{t('pricing.syncColumnModel')}</th>
+                    <th className="px-3 py-2 font-medium">{t('pricing.syncColumnCurrent')}</th>
+                    <th className="px-3 py-2 font-medium">{t('pricing.syncColumnNext')}</th>
+                    <th className="px-3 py-2 font-medium">{t('pricing.syncColumnProvider')}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {syncPreviewRows.map((row) => (
+                    <tr key={row.model}>
+                      <td className="px-3 py-2 font-mono">{row.model}</td>
+                      <td className="px-3 py-2 font-mono text-xs text-muted-foreground">
+                        {row.hasExisting
+                          ? formatSyncPricing(row.current ?? {})
+                          : t('pricing.syncEmptyValue')}
+                      </td>
+                      <td className="px-3 py-2 font-mono text-xs">
+                        {formatSyncPricing({ billingMode: "volume", ...row.next })}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground">{row.next.provider}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <DialogFooter className="flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Checkbox
+                checked={syncOverwrite}
+                onCheckedChange={setSyncOverwrite}
+              />
+              {t('pricing.syncOverwriteExisting')}
+            </label>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => setSyncDialogOpen(false)}>
+                {t('common.cancel')}
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleApplySync}
+                disabled={syncPreviewRows.length === 0 || saveMutation.isPending}
+              >
+                {t('pricing.syncApplyCount', { count: syncPreviewRows.length })}
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageContainer>
   );
 }
