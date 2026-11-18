@@ -10,6 +10,8 @@ import {
     createStreamReassemblyIterable,
     encodeCanonicalToAnthropicMessagesResponse,
     encodeCanonicalToAnthropicMessagesStreamEvents,
+    encodeCanonicalToGeminiGenerateContentResponse,
+    encodeCanonicalToGeminiGenerateContentStreamEvents,
     encodeCanonicalToOpenAIChatResponse,
     encodeCanonicalToOpenAIChatStreamChunk,
     encodeCanonicalToOpenAIResponsesResponse,
@@ -18,11 +20,13 @@ import {
     encodeOpenAIChatStreamError,
     encodeOpenAIResponsesStreamError,
     normalizeAnthropicMessagesRequest,
+    normalizeGeminiGenerateContentRequest,
     normalizeOpenAIChatRequest,
     normalizeOpenAIResponsesRequest,
 } from "../airlock/canonical/index"
 import {
     anthropicMessagesRequestSchema,
+    geminiGenerateContentRequestSchema,
     openAIChatCompletionRequestSchema,
     openAIResponsesRequestSchema,
 } from "../airlock/protocols/index"
@@ -33,15 +37,15 @@ import {
 } from "../airlock/providers/index"
 import type { ProviderAdapter, ProviderRequestContext } from "../airlock/providers/index"
 import { GatewayError } from "../airlock/shared/errors"
+import { buildGeminiErrorPayload, buildGeminiErrorResponse } from "./shared/gemini-errors"
 import {
     getChannelProtocolDescriptor,
-    getRouteProtocol,
     getUpstreamHeaderAllowlist,
     resolveUpstreamBase,
     type ChannelProtocolDescriptor,
     type UpstreamProtocol,
 } from "./shared/protocol-registry"
-import type { RouteId } from "./shared/route-policy"
+import { parseGeminiRouteTarget, type RouteId } from "./shared/route-policy"
 import { buildUpstreamRequestHeaders } from "./shared/upstream-request-headers"
 import { estimateUsageFromBodies } from "./shared/usage-utils"
 
@@ -57,6 +61,7 @@ const ROUTE_PAYLOAD_LABELS: Record<Exclude<RouteId, "audio-speech">, string> = {
     "chat-completions": "openai-chat",
     "messages": "anthropic-messages",
     "responses": "openai-responses",
+    "gemini-generate-content": "gemini-generate-content",
 }
 
 const mapErrorType = (status: number, routeId: RouteId): string => {
@@ -102,6 +107,10 @@ const buildErrorPayload = (
         : undefined
     const code = getErrorCode(error)
 
+    if (routeId === "gemini-generate-content") {
+        return buildGeminiErrorPayload(status, message)
+    }
+
     if (routeId === "messages") {
         return {
             type: "error",
@@ -133,6 +142,11 @@ const buildErrorPayload = (
 
 const buildErrorResponse = (routeId: RouteId, error: unknown): Response => {
     const message = error instanceof Error ? error.message : "Upstream request failed"
+
+    if (routeId === "gemini-generate-content") {
+        return buildGeminiErrorResponse(getErrorStatus(error), message)
+    }
+
     return new Response(
         JSON.stringify(buildErrorPayload(routeId, error, message)),
         {
@@ -152,6 +166,11 @@ const createConversionNotRequiredError = (): GatewayError => {
 }
 
 const renderStreamError = (routeId: RouteId, error: unknown): string => {
+    if (routeId === "gemini-generate-content") {
+        const message = error instanceof Error ? error.message : "Upstream request failed"
+        return `data: ${JSON.stringify(buildGeminiErrorPayload(getErrorStatus(error), message))}\n\n`
+    }
+
     if (routeId === "messages") {
         return encodeAnthropicMessagesStreamError(error)
     }
@@ -163,7 +182,11 @@ const renderStreamError = (routeId: RouteId, error: unknown): string => {
     return encodeOpenAIChatStreamError(error)
 }
 
-const parseClientRequest = (routeId: RouteId, requestBody: any): CanonicalRequest => {
+const parseClientRequest = (
+    routeId: RouteId,
+    requestBody: any,
+    isStream: boolean,
+): CanonicalRequest => {
     if (routeId === "chat-completions") {
         return normalizeOpenAIChatRequest(
             openAIChatCompletionRequestSchema.parse(requestBody)
@@ -174,6 +197,14 @@ const parseClientRequest = (routeId: RouteId, requestBody: any): CanonicalReques
         return normalizeAnthropicMessagesRequest(
             anthropicMessagesRequestSchema.parse(requestBody)
         )
+    }
+
+    if (routeId === "gemini-generate-content") {
+        return normalizeGeminiGenerateContentRequest({
+            ...geminiGenerateContentRequestSchema.parse(requestBody),
+            model: String(requestBody?.model ?? ""),
+            stream: isStream,
+        })
     }
 
     return normalizeOpenAIResponsesRequest(
@@ -244,16 +275,50 @@ const assertConversionSupported = (
     }
 }
 
+/**
+ * Adapters build `{baseUrl}{path}` themselves. An endpoint ending in "#" must be used
+ * verbatim, so the fetcher rewrites origin and path while keeping the query parameters
+ * the adapter added (`alt=sse`, forwarded query).
+ */
+const createExactUrlFetcher = (endpoint: string): typeof fetch => {
+    const exactUrl = new URL(endpoint.replace(/#$/, ""))
+
+    return ((input: RequestInfo | URL, init?: RequestInit) => {
+        const requestedUrl = new URL(
+            input instanceof Request
+                ? input.url
+                : input instanceof URL
+                    ? input.toString()
+                    : String(input)
+        )
+        const targetUrl = new URL(exactUrl.toString())
+
+        requestedUrl.searchParams.forEach((value, key) => {
+            targetUrl.searchParams.set(key, value)
+        })
+
+        return fetch(targetUrl, init)
+    }) as typeof fetch
+}
+
 const createAdapter = (
     descriptor: ChannelProtocolDescriptor,
+    config: ChannelConfig,
     baseUrl: string,
     apiKey: string,
 ): ProviderAdapter => {
+    // Gemini native endpoints are bases for `/models/{model}:{action}`, so "#" only pins
+    // the base path and the adapter still appends the model route.
+    const fetcher = config.endpoint?.endsWith("#") && descriptor.provider !== "gemini"
+        ? createExactUrlFetcher(config.endpoint)
+        : undefined
+
     if (descriptor.provider === "anthropic") {
         return new AnthropicProviderAdapter({
             apiKey,
             baseUrl,
             defaultMaxTokens: DEFAULT_ANTHROPIC_MAX_TOKENS,
+            ...(fetcher ? { fetcher } : {}),
         })
     }
 
@@ -268,6 +333,7 @@ const createAdapter = (
         apiKey,
         baseUrl,
         auth: descriptor.auth,
+        ...(fetcher ? { fetcher } : {}),
     })
 }
 
@@ -302,6 +368,10 @@ const encodeNonStreamResponse = (
     routeId: RouteId,
     response: CanonicalResponse,
 ): Response => {
+    if (routeId === "gemini-generate-content") {
+        return c.json(encodeCanonicalToGeminiGenerateContentResponse(response))
+    }
+
     if (routeId === "messages") {
         return c.json(encodeCanonicalToAnthropicMessagesResponse(response))
     }
@@ -343,21 +413,23 @@ export default {
         trackingState: RequestTrackingState,
         routeId: RouteId,
     ): Promise<Response> {
-        if (routeId === "audio-speech") {
-            return buildErrorResponse(routeId, createConversionNotRequiredError())
-        }
-
         const descriptor = getChannelProtocolDescriptor(config.type)
         const upstreamProtocol = descriptor?.protocol
-        const clientProtocol = getRouteProtocol(routeId)
 
-        if (!descriptor || !upstreamProtocol || !clientProtocol || clientProtocol === upstreamProtocol) {
+        if (!descriptor || !upstreamProtocol) {
+            trackingState.upstreamStatus = 500
+            trackingState.errorSummary = "Channel type does not support protocol conversion"
             return buildErrorResponse(routeId, createConversionNotRequiredError())
         }
+
+        const geminiTarget = routeId === "gemini-generate-content"
+            ? parseGeminiRouteTarget(new URL(c.req.url).pathname)
+            : null
+        const isStream = geminiTarget ? geminiTarget.stream : requestBody?.stream === true
 
         let canonical: CanonicalRequest
         try {
-            canonical = parseClientRequest(routeId, requestBody)
+            canonical = parseClientRequest(routeId, requestBody, isStream)
             assertConversionSupported(canonical, upstreamProtocol)
         } catch (error) {
             const payloadError = error instanceof GatewayError
@@ -370,7 +442,7 @@ export default {
         }
 
         const base = resolveUpstreamBase(config)
-        const adapter = createAdapter(descriptor, base.baseUrl, config.api_key || "")
+        const adapter = createAdapter(descriptor, config, base.baseUrl, config.api_key || "")
         const requestId = crypto.randomUUID()
         const providerContext: ProviderRequestContext = {
             requestId,
@@ -459,6 +531,9 @@ export default {
                 toolType?: "function_call" | "custom_tool_call"
             }>(),
         }
+        const geminiState: Parameters<typeof encodeCanonicalToGeminiGenerateContentStreamEvents>[1] = {
+            toolCalls: new Map(),
+        }
 
         let usageSaved = false
         let sawOutput = false
@@ -489,6 +564,15 @@ export default {
 
             if (event.type === "response_completed" && event.usage) {
                 await maybeSaveUsage(toRepoUsage(upstreamProtocol, event.usage))
+            }
+
+            if (routeId === "gemini-generate-content") {
+                for (const payload of encodeCanonicalToGeminiGenerateContentStreamEvents(event, geminiState)) {
+                    controller.enqueue(
+                        encoder.encode(`data: ${JSON.stringify(payload)}\n\n`)
+                    )
+                }
+                return
             }
 
             if (routeId === "messages") {

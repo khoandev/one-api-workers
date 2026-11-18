@@ -1,10 +1,7 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { Context } from "hono";
 
-import azureOpenaiProxy from "../src/providers/azure-openai-proxy";
-import claudeProxy from "../src/providers/claude-proxy";
-import openaiProxy from "../src/providers/openai-proxy";
-import openaiResponsesProxy from "../src/providers/openai-responses-proxy";
+import passthroughProxy from "../src/providers/passthrough-proxy";
 import protocolConversion from "../src/providers/protocol-conversion";
 import { getProvider } from "../src/providers/shared/provider-registry";
 import {
@@ -303,13 +300,15 @@ test("responses native tools are rejected before the upstream call", async () =>
     expect(response.status).toBe(400);
 });
 
-test("route policy keeps audio closed and respects direct-only gaps", () => {
+test("route policy keeps audio closed and allows exact endpoints everywhere", () => {
     expect(isChannelAllowedForRoute("messages", { type: "openai", endpoint: "https://api.openai.com" })).toBe(true);
     expect(isChannelAllowedForRoute("audio-speech", { type: "openai", endpoint: "https://api.openai.com" })).toBe(false);
     expect(isChannelAllowedForRoute("audio-speech", { type: "openai-audio", endpoint: "https://api.openai.com" })).toBe(true);
     expect(isChannelAllowedForRoute("messages", { type: "claude", endpoint: "https://api.anthropic.com/#" })).toBe(true);
-    expect(isChannelAllowedForRoute("chat-completions", { type: "claude", endpoint: "https://api.anthropic.com/#" })).toBe(false);
-    expect(isChannelAllowedForRoute("chat-completions", { type: "gemini-native", endpoint: "https://generativelanguage.googleapis.com/#" })).toBe(false);
+    expect(isChannelAllowedForRoute("chat-completions", { type: "claude", endpoint: "https://api.anthropic.com/#" })).toBe(true);
+    expect(isChannelAllowedForRoute("chat-completions", { type: "gemini-native", endpoint: "https://generativelanguage.googleapis.com/#" })).toBe(true);
+    expect(isChannelAllowedForRoute("gemini-generate-content", { type: "gemini-native", endpoint: "https://generativelanguage.googleapis.com" })).toBe(true);
+    expect(isChannelAllowedForRoute("gemini-generate-content", { type: "openai-audio", endpoint: "https://api.openai.com" })).toBe(false);
     expect(isChannelAllowedForRoute("chat-completions", { type: undefined, endpoint: "https://api.openai.com" })).toBe(false);
 });
 
@@ -1095,14 +1094,14 @@ test("mid stream failures are reported in band for messages clients", async () =
     expect(text).toContain("openai boom");
 });
 
-test("the conversion provider refuses same protocol dispatches", async () => {
+test("the conversion provider refuses channels without an upstream protocol", async () => {
     const { saved, saveUsage } = collectUsage();
 
     const response = await protocolConversion.fetch(
         buildContext("/v1/chat/completions"),
         {
             name: "test",
-            type: "openai",
+            type: "openai-audio",
             endpoint: "https://upstream.example",
             api_key: "k",
         } as ChannelConfig,
@@ -1158,25 +1157,27 @@ test("route policy accepts every text protocol on text routes", () => {
     for (const routeId of textRoutes) {
         for (const type of textTypes) {
             expect(isChannelAllowedForRoute(routeId, { type, endpoint })).toBe(true);
+            expect(isChannelAllowedForRoute(routeId, { type, endpoint: `${endpoint}#` })).toBe(true);
         }
     }
 
     expect(isChannelAllowedForRoute("audio-speech", { type: "claude", endpoint })).toBe(false);
     expect(isChannelAllowedForRoute("audio-speech", { type: "azure-openai-audio", endpoint })).toBe(true);
     expect(isChannelAllowedForRoute("audio-speech", { type: "openai-audio", endpoint: `${endpoint}#` })).toBe(true);
-    expect(isChannelAllowedForRoute("responses", { type: "openai-responses", endpoint: `${endpoint}#` })).toBe(true);
-    expect(isChannelAllowedForRoute("responses", { type: "claude", endpoint: `${endpoint}#` })).toBe(false);
-    expect(isChannelAllowedForRoute("messages", { type: "azure-openai-responses", endpoint: `${endpoint}#` })).toBe(false);
-    expect(isChannelAllowedForRoute("chat-completions", { type: "openai-responses", endpoint: `${endpoint}#` })).toBe(false);
 });
 
-test("dispatch picks conversion only when the upstream protocol differs", () => {
-    expect(getProvider("chat-completions", "openai")).toBe(openaiProxy.fetch);
-    expect(getProvider("chat-completions", "gemini")).toBe(openaiProxy.fetch);
-    expect(getProvider("chat-completions", "azure-openai")).toBe(azureOpenaiProxy.fetch);
-    expect(getProvider("messages", "claude")).toBe(claudeProxy.fetch);
-    expect(getProvider("responses", "openai-responses")).toBe(openaiResponsesProxy.fetch);
+test("dispatch forwards same protocols and converts cross protocols", () => {
+    expect(getProvider("chat-completions", "openai")).toBe(passthroughProxy.fetch);
+    expect(getProvider("chat-completions", "gemini")).toBe(passthroughProxy.fetch);
+    expect(getProvider("chat-completions", "azure-openai")).toBe(passthroughProxy.fetch);
+    expect(getProvider("messages", "claude")).toBe(passthroughProxy.fetch);
+    expect(getProvider("responses", "openai-responses")).toBe(passthroughProxy.fetch);
+    expect(getProvider("responses", "azure-openai-responses")).toBe(passthroughProxy.fetch);
+    expect(getProvider("gemini-generate-content", "gemini-native")).toBe(passthroughProxy.fetch);
+    expect(getProvider("audio-speech", "openai-audio")).toBe(passthroughProxy.fetch);
 
+    expect(getProvider("gemini-generate-content", "openai")).toBe(protocolConversion.fetch);
+    expect(getProvider("gemini-generate-content", "claude")).toBe(protocolConversion.fetch);
     expect(getProvider("messages", "openai")).toBe(protocolConversion.fetch);
     expect(getProvider("messages", "claude-to-openai")).toBe(protocolConversion.fetch);
     expect(getProvider("messages", "openai-responses")).toBe(protocolConversion.fetch);
@@ -1841,7 +1842,7 @@ const conversionStreamCases: Array<{
 ];
 
 const streamOutputExpectations: Record<
-    Exclude<RouteId, "audio-speech">,
+    string,
     { contains: string[]; excludes: string[] }
 > = {
     "chat-completions": {

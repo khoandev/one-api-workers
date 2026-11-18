@@ -71,30 +71,16 @@ const CHANNEL_PROTOCOLS: Record<string, ChannelProtocolDescriptor> = {
 
 const AUDIO_CHANNEL_TYPES = ["openai-audio", "azure-openai-audio"]
 
-const DIRECT_CHANNEL_TYPES = new Set<string>([
-    "openai",
-    "claude-to-openai",
-    "gemini",
-    "azure-openai",
-    "openai-responses",
-    "azure-openai-responses",
-    "claude",
-    ...AUDIO_CHANNEL_TYPES,
-])
-
 const ROUTE_PROTOCOLS: Record<RouteId, UpstreamProtocol | null> = {
     "chat-completions": "openai-chat",
     "messages": "anthropic-messages",
     "responses": "openai-responses",
+    "gemini-generate-content": "gemini-generate-content",
     "audio-speech": null,
 }
 
 export const isAudioChannelType = (type: string | undefined | null): boolean => {
     return !!type && AUDIO_CHANNEL_TYPES.includes(type)
-}
-
-export const hasDirectProvider = (type: string | undefined | null): boolean => {
-    return !!type && DIRECT_CHANNEL_TYPES.has(type)
 }
 
 export const getRouteProtocol = (routeId: RouteId): UpstreamProtocol | null => {
@@ -130,9 +116,18 @@ const buildBaseResult = (targetUrl: URL, trailingSegment: string) => {
     }
 }
 
-const normalizeGeminiNativeBaseUrl = (endpoint: string): string => {
-    const targetUrl = new URL(endpoint)
+/**
+ * Gemini native endpoints are bases for `/models/{model}:{action}`.
+ * A trailing "#" keeps the configured path verbatim instead of appending `/v1beta`.
+ */
+export const normalizeGeminiNativeBaseUrl = (endpoint: string): string => {
+    const targetUrl = new URL(endpoint.replace(/#$/, ""))
     const pathname = targetUrl.pathname.replace(/\/+$/, "")
+
+    if (endpoint.endsWith("#")) {
+        return `${targetUrl.origin}${pathname}`
+    }
+
     const normalizedPath = pathname.endsWith("/v1beta") || pathname.endsWith("/v1")
         ? pathname
         : `${pathname}/v1beta`

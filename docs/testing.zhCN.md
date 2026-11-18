@@ -23,6 +23,13 @@ cd frontend && bun run lint
 
 使用 `bun test tests` 运行专项回归测试。数据库回归测试使用隔离的内存 SQLite 和本地 D1 绑定（`getPlatformProxy` 关闭持久化和远程绑定），不会修改已有的本地或生产 D1 数据。`tests/local-d1.test.ts` 在实际本地 D1 运行时中验证迁移与认证并发。
 
+Provider 分发测试按行为拆分：
+
+- `tests/protocol-conversion.test.ts`：路由/渠道矩阵、跨协议转换、Gemini 入站编码、错误结构
+- `tests/passthrough.test.ts`：各协议原样转发——URL 构造、鉴权替换、请求头白名单、请求体保真、`#` 精确端点、SSE 字节保真、用量采集
+- `tests/gemini-inbound.test.ts`：`/v1beta/models/*` 解析、`x-goog-api-key` / `?key=` 鉴权、转换到 chat/Claude/Responses 渠道、流式输出、Gemini 错误结构
+- `tests/chat-stream-usage.test.ts`：流式用量估算与权威用量
+
 ## 本地 E2E
 
 仓库内置了一套基于 mock upstream 的本地端到端验证脚本：
@@ -39,7 +46,10 @@ cd frontend && bun run lint
 - `/v1/chat/completions`
 - `/v1/messages`
 - `/v1/responses`
-- 上游请求头白名单与敏感头剥离
+- `/v1beta/models/*` Gemini 原生入站（`gemini-native` 原样转发，以及转换到 OpenAI、Claude、Responses 渠道）
+- 同协议原样转发，包括多模态 part 与 `#` 精确端点
+- `/v1/audio/speech` 路径与鉴权
+- 上游请求头白名单与敏感头剥离，包含 `x-goog-api-key`
 - 管理员登录相关限速与系统配置场景
 
 ### 前置条件

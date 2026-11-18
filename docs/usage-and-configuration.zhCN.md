@@ -95,6 +95,26 @@ curl https://your-domain.com/v1/audio/speech \
   --output speech.mp3
 ```
 
+#### Gemini 原生 GenerateContent 接口
+
+Gemini SDK 及客户端可直接调用原生路由。`model` 从 URL 路径读取，请求体保持 Gemini 格式。
+
+```bash
+curl https://your-domain.com/v1beta/models/gemini-2.5-flash:generateContent \
+  -H "Content-Type: application/json" \
+  -H "x-goog-api-key: YOUR_API_TOKEN" \
+  -d '{
+    "contents": [
+      { "role": "user", "parts": [{ "text": "Hello, Gemini!" }] }
+    ]
+  }'
+```
+
+- 流式：使用 `:streamGenerateContent`。网关始终返回 SSE（`data: {...}` 帧，不含 `[DONE]` 结束标记）。
+- 鉴权：支持 `x-goog-api-key`、`Authorization: Bearer` 或 `?key=YOUR_API_TOKEN`。`?key=` 仅对 `/v1beta/models/*` 生效，其他路由必须使用请求头。
+- 渠道类型：接受任意文本渠道类型。`gemini-native` 渠道原样转发；OpenAI、Azure、Claude、Responses 渠道走协议转换。
+- 错误：使用 Gemini 错误结构 `{ "error": { "code": 400, "message": "...", "status": "INVALID_ARGUMENT" } }`。协议转换仅支持文本、function call、function response 三种 part，图片需使用 `gemini-native` 渠道。
+
 #### 模型列表接口
 
 ```bash
@@ -300,8 +320,8 @@ OpenAI 兼容聊天渠道。`/v1/messages` 请求与其他 OpenAI 聊天渠道�
 
 - `name`：渠道显示名称
 - `type`：服务商类型，支持 `openai`、`gemini`、`gemini-native`、`azure-openai`、`claude`、`claude-to-openai`、`openai-responses`、`azure-openai-responses`、`openai-audio`、`azure-openai-audio`
-- 协议转换：`/v1/chat/completions`、`/v1/messages`、`/v1/responses` 均接受任意文本渠道类型；客户端协议与渠道协议不一致时，请求与响应（含 SSE 流）自动转换。仅 Responses 支持的字段（`previous_response_id`、会话、prompt、Responses 原生工具）需要 Responses 渠道；多模态内容不参与转换，需使用同协议渠道。
-- `endpoint`：API 端点地址（末尾加 `#` 可跳过自动路径拼接并原样请求该 URL）
+- 协议转换：`/v1/chat/completions`、`/v1/messages`、`/v1/responses`、`/v1beta/models/*` 均接受任意文本渠道类型；客户端协议与渠道协议一致时原样转发，保留请求体、服务商原生字段、图片与 SSE 帧。协议不一致时，请求与响应（含 SSE 流）自动转换。仅 Responses 支持的字段（`previous_response_id`、会话、prompt、Responses 原生工具）需要 Responses 渠道；多模态内容不参与转换，需使用同协议渠道。
+- `endpoint`：API 端点地址（末尾加 `#` 可跳过自动路径拼接并原样请求该 URL，原样转发与协议转换均生效）
 - `enabled`：是否参与路由（默认 `true`）
 - `weight`：权重优先级（`0`–`5`，默认 `0`）
 - `api_keys`：上游 API 密钥列表（支持多 Key 随机选取与重试轮换）

@@ -1,5 +1,5 @@
 import { Context } from "hono"
-import { getApiKeyFromHeaders, fetchTokenData, fetchChannelsForToken } from "./auth"
+import { getApiKeyForRoute, fetchTokenData, fetchChannelsForToken } from "./auth"
 import { RouteId, isChannelAllowedForRoute } from "./route-policy"
 import { findChannelModelMapping, getJsonSetting } from "../../utils"
 import { CONSTANTS } from "../../constants"
@@ -41,11 +41,21 @@ export const pickHighestPriorityChannel = (
     return highestPriorityChannels[randomIndex];
 }
 
+/**
+ * Gemini native routes carry the model in the URL, so the caller passes it as a hint
+ * instead of injecting a synthetic body field.
+ */
+export type ChannelResolutionHint = {
+    model: string
+    stream: boolean
+}
+
 export const resolveChannel = async (
     c: Context<HonoCustomType>,
-    routeId: RouteId
+    routeId: RouteId,
+    hint?: ChannelResolutionHint
 ): Promise<ChannelResolution | Response> => {
-    const apiKey = getApiKeyFromHeaders(c);
+    const apiKey = getApiKeyForRoute(c, routeId);
     if (!apiKey) {
         return c.text("Authorization header or x-api-key not found", 401);
     }
@@ -69,7 +79,7 @@ export const resolveChannel = async (
     } catch (error) {
         return c.text("Invalid JSON body", 400);
     }
-    const requestedModel = requestBody.model;
+    const requestedModel = hint?.model ?? requestBody.model;
     if (!requestedModel) {
         return c.text("Model is required", 400);
     }
@@ -168,7 +178,7 @@ export const resolveChannel = async (
         providerType: selectedChannel.config.type || "unknown",
         requestedModel,
         upstreamModel: selectedChannel.mapping.id,
-        streamMode: requestBody.stream ? "stream" as const : "sync" as const,
+        streamMode: (hint?.stream ?? requestBody.stream) ? "stream" as const : "sync" as const,
         requestId: requestMetadata.requestId,
         traceId: requestMetadata.traceId,
         clientIp: requestMetadata.clientIp,

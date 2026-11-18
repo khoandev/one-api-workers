@@ -1,10 +1,6 @@
 import { Context } from "hono"
 
-import azureOpenaiProxy from "../azure-openai-proxy"
-import openaiProxy from "../openai-proxy"
-import claudeProxy from "../claude-proxy"
-import openaiResponsesProxy from "../openai-responses-proxy"
-import azureOpenaiResponsesProxy from "../azure-openai-responses-proxy"
+import passthroughProxy from "../passthrough-proxy"
 import protocolConversion from "../protocol-conversion"
 import { getChannelProtocolDescriptor, getRouteProtocol } from "./protocol-registry"
 import type { RouteId } from "./route-policy"
@@ -18,27 +14,23 @@ export type ProviderFetch = (
     routeId: RouteId,
 ) => Promise<Response>
 
-const providerMap: Record<string, ProviderFetch> = {
-    "azure-openai": azureOpenaiProxy.fetch,
-    "openai": openaiProxy.fetch,
-    "gemini": openaiProxy.fetch,
-    "azure-openai-audio": azureOpenaiProxy.fetch,
-    "openai-audio": openaiProxy.fetch,
-    "claude": claudeProxy.fetch,
-    "claude-to-openai": openaiProxy.fetch,
-    "openai-responses": openaiResponsesProxy.fetch,
-    "azure-openai-responses": azureOpenaiResponsesProxy.fetch,
-}
-
+/**
+ * Audio routes and same-protocol text channels forward the request verbatim;
+ * only a protocol mismatch goes through conversion.
+ */
 export const getProvider = (routeId: RouteId, type: string): ProviderFetch | undefined => {
     if (routeId === "audio-speech") {
-        return providerMap[type]
+        return passthroughProxy.fetch
     }
 
     const descriptor = getChannelProtocolDescriptor(type)
-    if (descriptor && descriptor.protocol !== getRouteProtocol(routeId)) {
-        return protocolConversion.fetch
+    if (!descriptor) {
+        return undefined
     }
 
-    return providerMap[type]
+    if (descriptor.protocol === getRouteProtocol(routeId)) {
+        return passthroughProxy.fetch
+    }
+
+    return protocolConversion.fetch
 }

@@ -5,7 +5,7 @@
  */
 
 const PORT = 9999
-const INSPECTABLE_REQUEST_KEYS = ["chat-completions", "gemini-native", "messages", "models", "responses"] as const
+const INSPECTABLE_REQUEST_KEYS = ["audio-speech", "chat-completions", "exact-chat", "gemini-native", "messages", "models", "responses"] as const
 
 type InspectableRequestKey = typeof INSPECTABLE_REQUEST_KEYS[number]
 
@@ -23,9 +23,17 @@ const toHeaderRecord = (headers: Headers): Record<string, string> => {
 }
 
 const getCaptureKey = (path: string): InspectableRequestKey | null => {
-  if (path.endsWith(":generateContent") || path.endsWith(":streamGenerateContent")) {
-    return "gemini-native"
-  }
+    if (path.endsWith(":generateContent") || path.endsWith(":streamGenerateContent")) {
+        return "gemini-native"
+    }
+
+    if (path.includes("/exact/")) {
+        return "exact-chat"
+    }
+
+    if (path.endsWith("/audio/speech")) {
+        return "audio-speech"
+    }
 
   if (path.endsWith("/chat/completions")) {
     return "chat-completions"
@@ -179,7 +187,7 @@ const server = Bun.serve({
     const body = req.method === "POST" ? await req.json().catch(() => ({})) : {}
     const pathModel = path.match(/\/models\/([^:/]+):(?:generateContent|streamGenerateContent)$/)?.[1]
     const model = (body as any).model || pathModel || "mock-model"
-    const isStream = (body as any).stream === true
+    const isStream = (body as any).stream === true || path.endsWith(":streamGenerateContent")
 
     console.log(`[MOCK] ${req.method} ${path} model=${model} stream=${isStream}`)
     rememberRequest(req, path, body)
@@ -242,6 +250,13 @@ const server = Bun.serve({
         })
       }
       return Response.json(geminiNativeResponse(model))
+    }
+
+    // OpenAI audio speech
+    if (path.endsWith("/audio/speech")) {
+        return new Response("mock-audio-bytes", {
+            headers: { "content-type": "audio/mpeg", "cache-control": "no-cache" },
+        })
     }
 
     // Claude Messages API

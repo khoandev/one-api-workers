@@ -2,11 +2,9 @@ import { expect, test, spyOn } from "bun:test";
 import { handleStreamResponse } from "../src/providers/shared/openai-stream-utils";
 import { estimateTokensFromText } from "../src/providers/shared/usage-utils";
 import { Context } from "hono";
-import openai from "../src/providers/openai-proxy";
-import azure from "../src/providers/azure-openai-proxy";
+import passthroughProxy from "../src/providers/passthrough-proxy";
 
 const requestBody = { model: "test", messages: [{ role: "user", content: "你好" }], stream: true };
-const context = new Context<HonoCustomType>(new Request("http://localhost/"));
 const chunk = (delta: object) => `data:${JSON.stringify({ choices: [{ delta }] })}\r\n\r\n`;
 
 async function collectUsage(text: string, options: { fail?: boolean; splitBytes?: boolean } = {}) {
@@ -26,7 +24,7 @@ async function collectUsage(text: string, options: { fail?: boolean; splitBytes?
         },
     });
     const saved: Usage[] = [];
-    await handleStreamResponse(context, stream, requestBody, async usage => { saved.push(usage); });
+    await handleStreamResponse(stream, requestBody, async usage => { saved.push(usage); });
     return saved;
 }
 
@@ -77,7 +75,7 @@ test("a failing settlement callback is not called again for duplicate usage or f
     const summary = 'data: {"usage":{"prompt_tokens":5,"completion_tokens":2}}\n\n';
     const stream = new Response(chunk({ content: "answer" }) + summary + summary).body!;
     try {
-        await handleStreamResponse(context, stream, requestBody, async () => {
+        await handleStreamResponse(stream, requestBody, async () => {
             calls++;
             throw new Error("storage failed");
         });
@@ -85,8 +83,8 @@ test("a failing settlement callback is not called again for duplicate usage or f
     } finally { error.mockRestore(); }
 });
 
-for (const [name, provider] of [["OpenAI", openai], ["Azure", azure]] as const) {
-    test(`${name} provider preserves the client stream and settles missing usage in the background`, async () => {
+for (const [name, type] of [["OpenAI", "openai"], ["Azure", "azure-openai"]] as const) {
+    test(`${name} passthrough preserves the client stream and settles missing usage in the background`, async () => {
         const text = chunk({ content: "provider answer" }) + "data: [DONE]\n\n";
         const upstream = spyOn(globalThis, "fetch").mockResolvedValue(new Response(text, {
             headers: { "content-type": "text/event-stream", "x-upstream": "preserved" },
@@ -97,8 +95,8 @@ for (const [name, provider] of [["OpenAI", openai], ["Azure", azure]] as const) 
         });
         const saved: Usage[] = [];
         try {
-            const response = await provider.fetch(c, { name, type: "openai", endpoint: "https://upstream.example", api_key: "fixture-key" },
-                { ...requestBody }, async usage => { saved.push(usage); }, { retryCount: 0 });
+            const response = await passthroughProxy.fetch(c, { name, type, endpoint: "https://upstream.example", api_key: "fixture-key" },
+                { ...requestBody }, async usage => { saved.push(usage); }, { retryCount: 0 }, "chat-completions");
             expect(await response.text()).toBe(text);
             expect(response.headers.get("x-upstream")).toBe("preserved");
             await Promise.all(tasks);

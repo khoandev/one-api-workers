@@ -32,7 +32,7 @@ export const buildPrefixedTargetUrl = (
     prefixToStrip = "/v1",
     providerType?: string | null,
 ): URL => {
-    const targetUrl = new URL(endpoint);
+    const targetUrl = new URL(endpoint.replace(/#$/, ""));
 
     if (endpoint.endsWith("#")) {
         return targetUrl;

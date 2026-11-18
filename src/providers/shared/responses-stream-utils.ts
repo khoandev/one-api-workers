@@ -1,4 +1,3 @@
-import { Context } from "hono"
 import type {
     OpenAIResponsesResponse,
     OpenAIResponsesStreamEvent,
@@ -51,7 +50,6 @@ export const processStreamData = async (
 }
 
 export const handleStreamResponse = async (
-    c: Context<HonoCustomType>,
     streamForServer: ReadableStream<any> | undefined,
     requestBody: any,
     saveUsage: (usage: Usage) => Promise<void>

@@ -23,6 +23,13 @@ Notes:
 
 Run focused regression tests with `bun test tests`. Database regression tests use isolated in-memory SQLite and local D1 bindings (`getPlatformProxy` with persistence and remote bindings disabled). They do not modify existing local or production D1 data. `tests/local-d1.test.ts` checks migration and concurrent authentication against the actual local D1 runtime.
 
+Provider dispatch tests are split by behavior:
+
+- `tests/protocol-conversion.test.ts`: route/channel matrix, cross-protocol conversion, Gemini inbound encoding, error envelopes
+- `tests/passthrough.test.ts`: raw forwarding for every protocol — URL construction, auth replacement, header allowlists, body fidelity, `#` exact endpoints, SSE byte preservation, usage capture
+- `tests/gemini-inbound.test.ts`: `/v1beta/models/*` parsing, `x-goog-api-key` / `?key=` authentication, conversion to chat/Claude/Responses channels, streaming, Gemini error shapes
+- `tests/chat-stream-usage.test.ts`: stream usage estimation and authoritative usage
+
 ## Local E2E
 
 The repo ships a mock-upstream based local end-to-end suite:
@@ -39,7 +46,10 @@ Current E2E mainly covers:
 - `/v1/chat/completions`
 - `/v1/messages`
 - `/v1/responses`
-- Upstream header allowlist and sensitive-header stripping
+- `/v1beta/models/*` Gemini native inbound (raw `gemini-native`, plus conversion to OpenAI, Claude, and Responses channels)
+- Same-protocol raw forwarding, including multimodal parts and `#` exact endpoints
+- `/v1/audio/speech` path and authentication
+- Upstream header allowlist and sensitive-header stripping, including `x-goog-api-key`
 - Admin login rate limits and system-settings scenarios
 
 ### Prerequisites

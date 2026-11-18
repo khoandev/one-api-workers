@@ -35,8 +35,14 @@ curl -s "$API_URL/api/admin/channel" > /dev/null 2>&1 || true
 # Channel: gemini-native type
 "${DB_EXEC[@]}" "INSERT OR REPLACE INTO channel_config (key, value) VALUES ('test-gemini-native', '{\"name\":\"test-gemini-native\",\"type\":\"gemini-native\",\"endpoint\":\"$MOCK\",\"api_key\":\"mock-key\",\"deployment_mapper\":{\"gemini-native-model\":\"gemini-2.0-flash\"}}')"
 
+# Channel: exact URL (trailing #) openai type
+"${DB_EXEC[@]}" "INSERT OR REPLACE INTO channel_config (key, value) VALUES ('test-exact', '{\"name\":\"test-exact\",\"type\":\"openai\",\"endpoint\":\"$MOCK/exact/chat/completions#\",\"api_key\":\"mock-key\",\"deployment_mapper\":{\"gpt-4o-exact\":\"gpt-4o\"}}')"
+
+# Channel: openai-audio type
+"${DB_EXEC[@]}" "INSERT OR REPLACE INTO channel_config (key, value) VALUES ('test-audio', '{\"name\":\"test-audio\",\"type\":\"openai-audio\",\"endpoint\":\"$MOCK\",\"api_key\":\"mock-key\",\"deployment_mapper\":{\"tts-1\":\"tts-1\"}}')"
+
 # Token: access to all test channels only
-"${DB_EXEC[@]}" "INSERT OR REPLACE INTO api_token (key, value, usage) VALUES ('sk-mock-all', '{\"name\":\"mock-all\",\"channel_keys\":[\"test-openai\",\"test-azure\",\"test-claude\",\"test-c2o\",\"test-responses\",\"test-azure-resp\",\"test-gemini-native\"],\"total_quota\":99999999}', 0)"
+"${DB_EXEC[@]}" "INSERT OR REPLACE INTO api_token (key, value, usage) VALUES ('sk-mock-all', '{\"name\":\"mock-all\",\"channel_keys\":[\"test-openai\",\"test-azure\",\"test-claude\",\"test-c2o\",\"test-responses\",\"test-azure-resp\",\"test-gemini-native\",\"test-exact\",\"test-audio\"],\"total_quota\":99999999}', 0)"
 
 # Token: limited to openai only
 "${DB_EXEC[@]}" "INSERT OR REPLACE INTO api_token (key, value, usage) VALUES ('sk-mock-openai', '{\"name\":\"mock-openai\",\"channel_keys\":[\"test-openai\"],\"total_quota\":99999999}', 0)"

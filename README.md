@@ -32,10 +32,16 @@ Based on <a href="https://github.com/dreamhunter2333/awsl-one-api" target="_blan
 | `/v1/chat/completions` | OpenAI Chat Completions–compatible proxy | Any text channel type |
 | `/v1/messages` | Anthropic Claude Messages–compatible proxy | Any text channel type |
 | `/v1/responses` | OpenAI / Azure Responses proxy | Any text channel type |
+| `/v1beta/models/{model}:generateContent` | Gemini native generateContent proxy | Any text channel type |
+| `/v1beta/models/{model}:streamGenerateContent` | Gemini native streaming proxy | Any text channel type |
 | `/v1/audio/speech` | TTS speech generation proxy | `openai-audio`, `azure-openai-audio` |
 | `/v1/models` | Model list filtered by token permissions and quota | Returned dynamically from channels the token can access |
 
-Any text route accepts any text channel type. When the client protocol and the channel protocol differ, the request and the response (including SSE streams) are converted automatically. Same-protocol requests keep the direct proxy path. Responses-only state such as `previous_response_id`, conversations, prompts, and native Responses tools require a Responses channel.
+Any text route accepts any text channel type. When the client protocol and the channel protocol match, the request is forwarded verbatim: body, native provider fields, images, and SSE frames are preserved. When the protocols differ, the request and the response (including SSE streams) are converted through the canonical layer; multimodal parts and provider-native fields are not converted and need a same-protocol channel. Responses-only state such as `previous_response_id`, conversations, prompts, and native Responses tools require a Responses channel.
+
+A channel `endpoint` ending in `#` is requested verbatim, both for raw passthrough and for converted requests.
+
+Gemini native clients authenticate with `x-goog-api-key`, `Authorization: Bearer`, or `?key=`; the query form is only accepted on `/v1beta/models/*` routes.
 
 ## Deployment
 

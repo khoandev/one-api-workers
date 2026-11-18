@@ -95,6 +95,26 @@ curl https://your-domain.com/v1/audio/speech \
   --output speech.mp3
 ```
 
+#### Gemini Native GenerateContent API
+
+Gemini SDKs and clients can call the native routes directly. The `model` comes from the URL path; the request body stays in Gemini format.
+
+```bash
+curl https://your-domain.com/v1beta/models/gemini-2.5-flash:generateContent \
+  -H "Content-Type: application/json" \
+  -H "x-goog-api-key: YOUR_API_TOKEN" \
+  -d '{
+    "contents": [
+      { "role": "user", "parts": [{ "text": "Hello, Gemini!" }] }
+    ]
+  }'
+```
+
+- Streaming: use `:streamGenerateContent`. The gateway always answers with SSE (`data: {...}` frames, no `[DONE]` sentinel).
+- Auth: `x-goog-api-key`, `Authorization: Bearer`, or `?key=YOUR_API_TOKEN`. The `?key=` form is accepted only on `/v1beta/models/*`; other routes require a header.
+- Channel types: any text channel type. A `gemini-native` channel is forwarded verbatim; OpenAI, Azure, Claude, and Responses channels go through protocol conversion.
+- Errors use the Gemini envelope: `{ "error": { "code": 400, "message": "...", "status": "INVALID_ARGUMENT" } }`. Only text, function call, and function response parts are supported by conversion; images require a `gemini-native` channel.
+
 #### Model List API
 
 ```bash
@@ -300,8 +320,8 @@ Field notes:
 
 - `name`: display name
 - `type`: provider type — `openai`, `gemini`, `gemini-native`, `azure-openai`, `claude`, `claude-to-openai`, `openai-responses`, `azure-openai-responses`, `openai-audio`, `azure-openai-audio`
-- Protocol conversion: `/v1/chat/completions`, `/v1/messages`, and `/v1/responses` accept any text channel type. When client and channel protocols differ, requests and responses (including SSE) are converted automatically. Responses-only state (`previous_response_id`, conversations, prompts, native Responses tools) requires a Responses channel; multimodal content parts are not converted and need a same-protocol channel.
-- `endpoint`: API base URL (append `#` to bypass automatic path joining and use the exact URL)
+- Protocol conversion: `/v1/chat/completions`, `/v1/messages`, `/v1/responses`, and `/v1beta/models/*` accept any text channel type. When client and channel protocols match, the request is forwarded verbatim, preserving body, native provider fields, images, and SSE frames. When they differ, requests and responses (including SSE) are converted automatically. Responses-only state (`previous_response_id`, conversations, prompts, native Responses tools) requires a Responses channel; multimodal content parts are not converted and need a same-protocol channel.
+- `endpoint`: API base URL (append `#` to bypass automatic path joining and use the exact URL, for raw passthrough and converted requests alike)
 - `enabled`: whether this channel participates in routing (defaults to `true`)
 - `weight`: priority weight `0`–`5` for weighted selection (defaults to `0`)
 - `api_keys`: list of upstream API keys (a request picks one randomly and can rotate on retries)

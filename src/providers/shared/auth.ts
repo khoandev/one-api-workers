@@ -1,8 +1,11 @@
 import { Context } from "hono"
 
+import type { RouteId } from "./route-policy"
+
 export const getApiKeyFromHeaders = (c: Context<HonoCustomType>): string | null => {
     const authHeader = c.req.raw.headers.get('Authorization');
     const xApiKey = c.req.raw.headers.get('x-api-key');
+    const xGoogApiKey = c.req.raw.headers.get('x-goog-api-key');
 
     if (authHeader) {
         return authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : authHeader.trim();
@@ -10,7 +13,32 @@ export const getApiKeyFromHeaders = (c: Context<HonoCustomType>): string | null 
     if (xApiKey) {
         return xApiKey.trim();
     }
+    if (xGoogApiKey) {
+        return xGoogApiKey.trim();
+    }
     return null;
+}
+
+/**
+ * Gemini clients may authenticate with `?key=`. Only the Gemini native routes accept it,
+ * so the query parameter never becomes a fallback credential for other routes.
+ */
+export const getApiKeyFromQuery = (c: Context<HonoCustomType>): string | null => {
+    const key = new URL(c.req.url).searchParams.get('key')?.trim();
+    return key ? key : null;
+}
+
+/**
+ * `?key=` is a credential only for the Gemini native routes. Every other route keeps
+ * header-only authentication.
+ */
+export const getApiKeyForRoute = (c: Context<HonoCustomType>, routeId: RouteId): string | null => {
+    const headerKey = getApiKeyFromHeaders(c);
+    if (headerKey) {
+        return headerKey;
+    }
+
+    return routeId === 'gemini-generate-content' ? getApiKeyFromQuery(c) : null;
 }
 
 export const fetchTokenData = async (c: Context<HonoCustomType>, apiKey: string) => {

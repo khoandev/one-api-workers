@@ -8,6 +8,7 @@ const BLOCKED_HEADER_NAMES = new Set([
     "x-admin-session",
     "x-admin-token",
     "x-api-key",
+    "x-goog-api-key",
     "x-real-ip",
 ]);
 

@@ -1,4 +1,3 @@
-import { Context } from "hono"
 import { estimateTokensFromText } from "./usage-utils"
 
 const AUDIO_OUTPUT_TOKENS_PER_MINUTE = 1250
@@ -144,7 +143,6 @@ export const processStreamData = async (
 }
 
 export const handleStreamResponse = async (
-    _c: Context<HonoCustomType>,
     streamForServer: ReadableStream<Uint8Array> | undefined,
     requestBody: unknown,
     saveUsage: (usage: Usage) => Promise<void>

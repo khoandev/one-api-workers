@@ -301,6 +301,86 @@ assert_http "messages → openai chat stream" "200" "event: message_start" "$R"
 R=$(do_post -H "Authorization: Bearer sk-mock-all" "$API/v1/responses" -H "Content-Type: application/json" -d '{"model":"gpt-4o","stream":true,"input":"hi"}')
 assert_http "responses → openai chat stream" "200" "event: response.output_text.delta" "$R"
 
+# ---- Gemini native inbound ----
+echo ""
+echo "--- Gemini native inbound (/v1beta/models) ---"
+
+GEMINI_CONTENTS='{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}'
+
+R=$(do_post -H "x-goog-api-key: sk-mock-all" "$API/v1beta/models/gemini-native-model:generateContent" -H "Content-Type: application/json" -d "$GEMINI_CONTENTS")
+assert_http "gemini inbound → gemini-native raw" "200" "Mock Gemini native" "$R"
+assert "gemini inbound returns gemini envelope" '"candidates"' "$R"
+
+reset_mock_inspection
+R=$(do_post \
+  -H "x-goog-api-key: sk-mock-all" \
+  -H "Authorization: Bearer client-token" \
+  -H "Cookie: session=leak-me" \
+  -H "X-Forwarded-For: 203.0.113.12" \
+  "$API/v1beta/models/gemini-native-model:generateContent" \
+  -H "Content-Type: application/json" \
+  -d "$GEMINI_CONTENTS")
+assert_http "gemini header whitelist → 200" "200" "Mock Gemini native" "$R"
+INSPECT=$(get_mock_inspection "gemini-native")
+assert "gemini upstream auth uses channel key" "\"x-goog-api-key\":\"mock-key\"" "$INSPECT"
+assert_not_contains "gemini upstream strips client token" "sk-mock-all" "$INSPECT"
+assert_not_contains "gemini upstream strips cookie" "\"cookie\":" "$INSPECT"
+assert_not_contains "gemini upstream strips x-forwarded-for" "\"x-forwarded-for\":" "$INSPECT"
+assert "gemini raw upstream keeps contents" "\"contents\":" "$INSPECT"
+
+R=$(do_post -H "x-goog-api-key: sk-mock-all" "$API/v1beta/models/gemini-native-model:streamGenerateContent" -H "Content-Type: application/json" -d "$GEMINI_CONTENTS")
+assert_http "gemini inbound stream → 200 + SSE" "200" "data:" "$R"
+assert "gemini inbound stream uses sse frames" '"candidates"' "$R"
+assert_not_contains "gemini inbound stream has no DONE sentinel" "\[DONE\]" "$R"
+
+R=$(do_post -H "x-goog-api-key: sk-mock-all" "$API/v1beta/models/gpt-4o:generateContent" -H "Content-Type: application/json" -d "$GEMINI_CONTENTS")
+assert_http "gemini inbound → openai chat conversion" "200" "Mock response from gpt-4o" "$R"
+assert "gemini conversion returns gemini envelope" '"candidates"' "$R"
+
+R=$(do_post -H "x-goog-api-key: sk-mock-all" "$API/v1beta/models/claude-3-opus:generateContent" -H "Content-Type: application/json" -d "$GEMINI_CONTENTS")
+assert_http "gemini inbound → claude conversion" "200" "Mock Claude response" "$R"
+
+R=$(do_post -H "x-goog-api-key: sk-mock-all" "$API/v1beta/models/gpt-4o-resp:generateContent" -H "Content-Type: application/json" -d "$GEMINI_CONTENTS")
+assert_http "gemini inbound → responses conversion" "200" "Mock responses output" "$R"
+
+R=$(do_post "$API/v1beta/models/gemini-native-model:generateContent?key=sk-mock-all" -H "Content-Type: application/json" -d "$GEMINI_CONTENTS")
+assert_http "gemini inbound accepts ?key=" "200" "Mock Gemini native" "$R"
+
+R=$(do_post "$API/v1beta/models/gemini-native-model:generateContent?key=bad-key" -H "Content-Type: application/json" -d "$GEMINI_CONTENTS")
+assert_http "gemini inbound invalid ?key= → 401" "401" "Invalid API key" "$R"
+assert "gemini 401 uses gemini error shape" '"status":"UNAUTHENTICATED"' "$R"
+
+R=$(do_post "$API/v1/chat/completions?key=sk-mock-openai" -H "Content-Type: application/json" -d '{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}')
+assert_http "?key= is gemini-only → 401" "401" "Authorization header" "$R"
+
+R=$(do_post -H "x-goog-api-key: sk-mock-all" "$API/v1beta/models/gpt-4o:predict" -H "Content-Type: application/json" -d "$GEMINI_CONTENTS")
+assert_http "gemini unsupported action → 404" "404" '"error"' "$R"
+
+R=$(do_post -H "x-goog-api-key: sk-mock-all" "$API/v1beta/models/does-not-exist:generateContent" -H "Content-Type: application/json" -d "$GEMINI_CONTENTS")
+assert_http "gemini unmapped model → 400" "400" '"status":"INVALID_ARGUMENT"' "$R"
+
+R=$(do_post -H "x-goog-api-key: sk-mock-all" "$API/v1beta/models/gpt-4o:generateContent" -H "Content-Type: application/json" -d '{"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"image/png","data":"AAAA"}}]}]}')
+assert_http "gemini unsupported image part → 400" "400" '"status":"INVALID_ARGUMENT"' "$R"
+
+# ---- Raw passthrough fidelity ----
+echo ""
+echo "--- Raw passthrough fidelity ---"
+
+reset_mock_inspection
+R=$(do_post -H "Authorization: Bearer sk-mock-openai" "$API/v1/chat/completions" -H "Content-Type: application/json" -d '{"model":"gpt-4o","messages":[{"role":"user","content":[{"type":"text","text":"describe"},{"type":"image_url","image_url":{"url":"data:image/png;base64,AAAA"}}]}]}')
+assert_http "same-protocol multimodal → 200" "200" "Mock response" "$R"
+assert "same-protocol image part forwarded verbatim" "image_url" "$(get_mock_inspection "chat-completions")"
+
+reset_mock_inspection
+R=$(do_post -H "Authorization: Bearer sk-mock-all" "$API/v1/chat/completions" -H "Content-Type: application/json" -d '{"model":"gpt-4o-exact","messages":[{"role":"user","content":"hi"}]}')
+assert_http "exact endpoint channel → 200" "200" "Mock response" "$R"
+assert "exact endpoint uses the configured path" "\"path\":\"/exact/chat/completions\"" "$(get_mock_inspection "exact-chat")"
+
+R=$(curl -s -o /dev/null -w "%{http_code} %{content_type}" -X POST "$API/v1/audio/speech" -H "Authorization: Bearer sk-mock-all" -H "Content-Type: application/json" -d '{"model":"tts-1","input":"hello world","voice":"alloy"}')
+assert "audio speech → 200 audio/mpeg" "200 audio/mpeg" "$R"
+R=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API/v1/audio/speech" -H "Content-Type: application/json" -d '{"model":"tts-1","input":"hello world","voice":"alloy"}')
+assert "audio speech without auth → 401" "401" "$R"
+
 # ---- Quota ----
 echo ""
 echo "--- Quota check ---"

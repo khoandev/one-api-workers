@@ -10,19 +10,11 @@ const joinPath = (...segments: string[]): string => {
     return `/${cleanedSegments.join("/")}`;
 };
 
-export const buildAzureTargetUrl = (
-    request: Request,
-    endpoint: string
-): URL => {
-    const requestUrl = new URL(request.url);
-    return buildAzureTargetUrlFromPath(endpoint, requestUrl.pathname);
-};
-
 export const buildAzureTargetUrlFromPath = (
     endpoint: string,
     path: string
 ): URL => {
-    const targetUrl = new URL(endpoint);
+    const targetUrl = new URL(endpoint.replace(/#$/, ""));
 
     if (endpoint.endsWith("#")) {
         return targetUrl;
