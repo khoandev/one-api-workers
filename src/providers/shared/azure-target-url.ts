@@ -30,7 +30,9 @@ export const buildAzureTargetUrlFromPath = (
 
     const requestPath = path.replace(/^\/v1/, "");
     const currentBasePath = trimSlashes(targetUrl.pathname);
-    const explicitBasePath = endpoint.endsWith("/");
+    // A trailing slash only means "endpoint already includes the base path" when a
+    // path is present; "https://resource.openai.azure.com/" is a bare host.
+    const explicitBasePath = endpoint.endsWith("/") && currentBasePath.length > 0;
     const azureBasePath = currentBasePath.endsWith("openai/v1")
         ? currentBasePath
         : currentBasePath.endsWith("openai")
