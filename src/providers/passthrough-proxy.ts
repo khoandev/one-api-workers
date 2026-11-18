@@ -17,8 +17,9 @@ import {
 } from "./shared/openai-stream-utils"
 import { buildPrefixedTargetUrl } from "./shared/prefixed-target-url"
 import {
-    getChannelProtocolDescriptor,
+    getRouteProtocol,
     getUpstreamHeaderAllowlist,
+    resolveProtocolDescriptor,
     type ChannelProtocolDescriptor,
     type UpstreamProtocol,
 } from "./shared/protocol-registry"
@@ -202,8 +203,10 @@ export default {
         trackingState: RequestTrackingState,
         routeId: RouteId,
     ): Promise<Response> {
-        const descriptor = getChannelProtocolDescriptor(config.type)
-        const upstreamProtocol = descriptor?.protocol
+        const upstreamProtocol = getRouteProtocol(routeId) ?? undefined
+        const descriptor = upstreamProtocol
+            ? resolveProtocolDescriptor(config, upstreamProtocol)
+            : undefined
         const geminiTarget = routeId === "gemini-generate-content"
             ? parseGeminiRouteTarget(new URL(c.req.url).pathname)
             : null

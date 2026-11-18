@@ -49,7 +49,8 @@ const runProvider = async (
     requestBody: unknown,
     requestHeaders: Record<string, string> = {},
 ) => {
-    const provider = getProvider(routeId, type || "");
+    const channelConfig = { name: "test", type, endpoint: "", ...config } as ChannelConfig;
+    const provider = getProvider(routeId, channelConfig);
     if (!provider) throw new Error(`Missing provider for ${type}`);
 
     const context = buildContext(`/${routeId}`, requestHeaders);
@@ -57,7 +58,7 @@ const runProvider = async (
     const trackingState: RequestTrackingState = { retryCount: 0 };
     const response = await provider(
         context,
-        { name: "test", type, endpoint: "", ...config } as ChannelConfig,
+        channelConfig,
         requestBody,
         saveUsage,
         trackingState,
@@ -1098,29 +1099,29 @@ test("route policy accepts every text protocol on text routes", () => {
 });
 
 test("dispatch forwards same protocols and converts cross protocols", () => {
-    expect(getProvider("chat-completions", "openai")).toBe(passthroughProxy.fetch);
-    expect(getProvider("chat-completions", "azure-openai")).toBe(passthroughProxy.fetch);
-    expect(getProvider("messages", "claude")).toBe(passthroughProxy.fetch);
-    expect(getProvider("responses", "openai-responses")).toBe(passthroughProxy.fetch);
-    expect(getProvider("responses", "azure-openai-responses")).toBe(passthroughProxy.fetch);
-    expect(getProvider("gemini-generate-content", "gemini-native")).toBe(passthroughProxy.fetch);
-    expect(getProvider("audio-speech", "openai-audio")).toBe(passthroughProxy.fetch);
+    expect(getProvider("chat-completions", { type: "openai" })).toBe(passthroughProxy.fetch);
+    expect(getProvider("chat-completions", { type: "azure-openai" })).toBe(passthroughProxy.fetch);
+    expect(getProvider("messages", { type: "claude" })).toBe(passthroughProxy.fetch);
+    expect(getProvider("responses", { type: "openai-responses" })).toBe(passthroughProxy.fetch);
+    expect(getProvider("responses", { type: "azure-openai-responses" })).toBe(passthroughProxy.fetch);
+    expect(getProvider("gemini-generate-content", { type: "gemini-native" })).toBe(passthroughProxy.fetch);
+    expect(getProvider("audio-speech", { type: "openai-audio" })).toBe(passthroughProxy.fetch);
 
-    expect(getProvider("gemini-generate-content", "openai")).toBe(protocolConversion.fetch);
-    expect(getProvider("gemini-generate-content", "claude")).toBe(protocolConversion.fetch);
-    expect(getProvider("messages", "openai")).toBe(protocolConversion.fetch);
-    expect(getProvider("messages", "openai-responses")).toBe(protocolConversion.fetch);
-    expect(getProvider("messages", "gemini-native")).toBe(protocolConversion.fetch);
-    expect(getProvider("chat-completions", "claude")).toBe(protocolConversion.fetch);
-    expect(getProvider("chat-completions", "gemini-native")).toBe(protocolConversion.fetch);
-    expect(getProvider("chat-completions", "openai-responses")).toBe(protocolConversion.fetch);
-    expect(getProvider("responses", "claude")).toBe(protocolConversion.fetch);
-    expect(getProvider("responses", "gemini-native")).toBe(protocolConversion.fetch);
-    expect(getProvider("responses", "openai")).toBe(protocolConversion.fetch);
+    expect(getProvider("gemini-generate-content", { type: "openai" })).toBe(protocolConversion.fetch);
+    expect(getProvider("gemini-generate-content", { type: "claude" })).toBe(protocolConversion.fetch);
+    expect(getProvider("messages", { type: "openai" })).toBe(protocolConversion.fetch);
+    expect(getProvider("messages", { type: "openai-responses" })).toBe(protocolConversion.fetch);
+    expect(getProvider("messages", { type: "gemini-native" })).toBe(protocolConversion.fetch);
+    expect(getProvider("chat-completions", { type: "claude" })).toBe(protocolConversion.fetch);
+    expect(getProvider("chat-completions", { type: "gemini-native" })).toBe(protocolConversion.fetch);
+    expect(getProvider("chat-completions", { type: "openai-responses" })).toBe(protocolConversion.fetch);
+    expect(getProvider("responses", { type: "claude" })).toBe(protocolConversion.fetch);
+    expect(getProvider("responses", { type: "gemini-native" })).toBe(protocolConversion.fetch);
+    expect(getProvider("responses", { type: "openai" })).toBe(protocolConversion.fetch);
 
-    expect(getProvider("chat-completions", "unknown")).toBeUndefined();
-    expect(getProvider("chat-completions", "gemini")).toBeUndefined();
-    expect(getProvider("messages", "claude-to-openai")).toBeUndefined();
+    expect(getProvider("chat-completions", { type: "unknown" as ChannelType })).toBeUndefined();
+    expect(getProvider("chat-completions", { type: "gemini" as ChannelType })).toBeUndefined();
+    expect(getProvider("messages", { type: "claude-to-openai" as ChannelType })).toBeUndefined();
     expect(isChannelAllowedForRoute("chat-completions", { type: "gemini" as ChannelType, endpoint: "https://upstream.example" })).toBe(false);
     expect(isChannelAllowedForRoute("messages", { type: "claude-to-openai" as ChannelType, endpoint: "https://upstream.example" })).toBe(false);
 });
@@ -1439,54 +1440,54 @@ test("resolveUpstreamBase normalizes every channel endpoint form", () => {
     expect(resolveUpstreamBase({
         type: "gemini-native",
         endpoint: "https://generativelanguage.googleapis.com",
-    })).toEqual({ baseUrl: "https://generativelanguage.googleapis.com/v1beta", query: {} });
+    }, "gemini-generate-content")).toEqual({ baseUrl: "https://generativelanguage.googleapis.com/v1beta", query: {} });
     expect(resolveUpstreamBase({
         type: "gemini-native",
         endpoint: "https://generativelanguage.googleapis.com/v1beta/",
-    }).baseUrl).toBe("https://generativelanguage.googleapis.com/v1beta");
+    }, "gemini-generate-content").baseUrl).toBe("https://generativelanguage.googleapis.com/v1beta");
     expect(resolveUpstreamBase({
         type: "gemini-native",
         endpoint: "https://generativelanguage.googleapis.com/v1",
-    }).baseUrl).toBe("https://generativelanguage.googleapis.com/v1");
+    }, "gemini-generate-content").baseUrl).toBe("https://generativelanguage.googleapis.com/v1");
 
     expect(resolveUpstreamBase({
         type: "azure-openai",
         endpoint: "https://r.openai.azure.com/",
-    }).baseUrl).toBe("https://r.openai.azure.com/openai/v1");
+    }, "openai-chat").baseUrl).toBe("https://r.openai.azure.com/openai/v1");
     expect(resolveUpstreamBase({
         type: "azure-openai",
         endpoint: "https://r.openai.azure.com",
-    }).baseUrl).toBe("https://r.openai.azure.com/openai/v1");
+    }, "openai-chat").baseUrl).toBe("https://r.openai.azure.com/openai/v1");
     expect(resolveUpstreamBase({
         type: "azure-openai",
         endpoint: "https://r.openai.azure.com/openai/v1/",
-    }).baseUrl).toBe("https://r.openai.azure.com/openai/v1");
+    }, "openai-chat").baseUrl).toBe("https://r.openai.azure.com/openai/v1");
     expect(resolveUpstreamBase({
         type: "azure-openai-responses",
         endpoint: "https://r.openai.azure.com/",
-    }).baseUrl).toBe("https://r.openai.azure.com/openai/v1");
+    }, "openai-responses").baseUrl).toBe("https://r.openai.azure.com/openai/v1");
     expect(resolveUpstreamBase({
         type: "azure-openai-responses",
         endpoint: "https://r.openai.azure.com/openai/v1",
-    }).baseUrl).toBe("https://r.openai.azure.com/openai/v1");
+    }, "openai-responses").baseUrl).toBe("https://r.openai.azure.com/openai/v1");
 
     expect(resolveUpstreamBase({
         type: "openai-responses",
         endpoint: "https://api.openai.com",
-    }).baseUrl).toBe("https://api.openai.com/v1");
+    }, "openai-responses").baseUrl).toBe("https://api.openai.com/v1");
     expect(resolveUpstreamBase({
         type: "openai",
         endpoint: "https://api.openai.com/v1/",
-    }).baseUrl).toBe("https://api.openai.com/v1");
+    }, "openai-chat").baseUrl).toBe("https://api.openai.com/v1");
     expect(resolveUpstreamBase({
         type: "claude",
         endpoint: "https://api.anthropic.com",
-    }).baseUrl).toBe("https://api.anthropic.com/v1");
+    }, "anthropic-messages").baseUrl).toBe("https://api.anthropic.com/v1");
 
     expect(resolveUpstreamBase({
         type: "gemini-native",
         endpoint: "https://generativelanguage.googleapis.com?key=abc",
-    })).toEqual({
+    }, "gemini-generate-content")).toEqual({
         baseUrl: "https://generativelanguage.googleapis.com/v1beta",
         query: { key: "abc" },
     });
@@ -1610,7 +1611,8 @@ for (const [label, extra] of responsesOnlyFieldCases) {
         expect(response.status).toBe(400);
         const body = await response.json() as Record<string, any>;
         expect(body.error.code).toBe("request_unsupported_openai_semantics");
-        expect(body.error.message).toBe(`"${label}" requires an OpenAI Responses compatible channel`);
+        expect(body.error.param).toBe(label);
+        expect(body.error.message).toContain(`Unsupported features: ${label}`);
     });
 }
 

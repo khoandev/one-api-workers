@@ -8,6 +8,7 @@ export interface GatewayErrorOptions {
   headers?: Record<string, string>;
   cause?: unknown;
   upstreamErrorCode?: string;
+  param?: string;
 }
 
 export class GatewayError extends Error {
@@ -19,6 +20,7 @@ export class GatewayError extends Error {
   readonly requestId: string | undefined;
   readonly headers: Record<string, string> | undefined;
   readonly upstreamErrorCode: string | undefined;
+  readonly param: string | undefined;
 
   constructor(message: string, options: GatewayErrorOptions) {
     super(message, options.cause ? { cause: options.cause } : undefined);
@@ -31,5 +33,6 @@ export class GatewayError extends Error {
     this.requestId = options.requestId;
     this.headers = options.headers;
     this.upstreamErrorCode = options.upstreamErrorCode;
+    this.param = options.param;
   }
 }

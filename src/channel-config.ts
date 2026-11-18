@@ -1,3 +1,8 @@
+import {
+    resolveChannelProtocols,
+    resolvePrimaryProtocol,
+} from "./providers/shared/protocol-registry";
+
 export const DEFAULT_CHANNEL_AUTO_RETRY = true;
 export const DEFAULT_CHANNEL_AUTO_ROTATE = true;
 export const DEFAULT_CHANNEL_ENABLED = true;
@@ -6,7 +11,7 @@ export const MAX_CHANNEL_WEIGHT = 5;
 export const DEFAULT_CHANNEL_MODEL_ENABLED = true;
 export const DEFAULT_CLAUDE_API_VERSION = "2023-06-01";
 
-export type NormalizedChannelConfig = Omit<ChannelConfig, "enabled" | "weight" | "api_keys" | "auto_retry" | "auto_rotate" | "models" | "supported_models" | "deployment_mapper"> & {
+export type NormalizedChannelConfig = Omit<ChannelConfig, "enabled" | "weight" | "api_keys" | "auto_retry" | "auto_rotate" | "models" | "supported_models" | "deployment_mapper" | "protocols" | "primary_protocol"> & {
     enabled: boolean;
     weight: number;
     api_keys: string[];
@@ -15,6 +20,8 @@ export type NormalizedChannelConfig = Omit<ChannelConfig, "enabled" | "weight" |
     models: ChannelModelMapping[];
     supported_models: string[];
     deployment_mapper: Record<string, string>;
+    protocols: ChannelProtocol[];
+    primary_protocol: ChannelProtocol | null;
 };
 
 const normalizeChannelWeight = (weight: unknown): number => {
@@ -151,6 +158,8 @@ export const normalizeChannelConfig = (
         models,
         supported_models: models.map((model) => model.name),
         deployment_mapper: deploymentMapper,
+        protocols: resolveChannelProtocols(config),
+        primary_protocol: resolvePrimaryProtocol(config),
         model_pricing: config.model_pricing,
     };
 };
@@ -170,6 +179,8 @@ export const sanitizeChannelConfig = (
         auto_retry: normalized.auto_retry,
         auto_rotate: normalized.auto_rotate,
         models: normalized.models,
+        protocols: normalized.protocols,
+        ...(normalized.primary_protocol ? { primary_protocol: normalized.primary_protocol } : {}),
         model_pricing: normalized.model_pricing,
     };
 };

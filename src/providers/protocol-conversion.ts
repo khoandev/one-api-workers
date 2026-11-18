@@ -39,8 +39,10 @@ import type { ProviderAdapter, ProviderRequestContext } from "../airlock/provide
 import { GatewayError } from "../airlock/shared/errors"
 import { buildGeminiErrorPayload, buildGeminiErrorResponse } from "./shared/gemini-errors"
 import {
-    getChannelProtocolDescriptor,
     getUpstreamHeaderAllowlist,
+    resolveChannelProtocols,
+    resolvePrimaryProtocol,
+    resolveProtocolDescriptor,
     resolveUpstreamBase,
     type ChannelProtocolDescriptor,
     type UpstreamProtocol,
@@ -106,6 +108,7 @@ const buildErrorPayload = (
         ? error.upstreamErrorCode
         : undefined
     const code = getErrorCode(error)
+    const param = error instanceof GatewayError ? error.param : undefined
 
     if (routeId === "gemini-generate-content") {
         return buildGeminiErrorPayload(status, message)
@@ -127,6 +130,7 @@ const buildErrorPayload = (
                 message,
                 type: mappedType,
                 code,
+                ...(param ? { param } : {}),
             },
         }
     }
@@ -136,6 +140,7 @@ const buildErrorPayload = (
             message,
             type: upstreamErrorCode ?? mappedType,
             code,
+            ...(param ? { param } : {}),
         },
     }
 }
@@ -157,7 +162,7 @@ const buildErrorResponse = (routeId: RouteId, error: unknown): Response => {
 }
 
 const createConversionNotRequiredError = (): GatewayError => {
-    return new GatewayError("Protocol conversion is not required for this channel", {
+    return new GatewayError("Channel has no upstream protocol available for conversion", {
         code: "protocol_conversion_not_required",
         category: "configuration",
         httpStatus: 500,
@@ -224,55 +229,157 @@ const createInvalidPayloadError = (routeId: RouteId): GatewayError => {
     )
 }
 
-const createUnsupportedSemanticsError = (message: string): GatewayError => {
+const createUnsupportedSemanticsError = (
+    message: string,
+    code: string,
+    param: string | undefined,
+): GatewayError => {
     return new GatewayError(message, {
-        code: "request_unsupported_openai_semantics",
+        code,
         category: "request",
         httpStatus: 400,
         retryable: false,
+        ...(param ? { param } : {}),
     })
 }
 
+const OPENAI_RESPONSES_ONLY_FIELDS: Array<[string, (request: CanonicalRequest) => unknown]> = [
+    ["previous_response_id", (request) => request.previousResponseId],
+    ["conversation", (request) => request.conversationId],
+    ["prompt", (request) => request.prompt],
+    ["reasoning.summary", (request) => request.reasoningSummary],
+    ["truncation", (request) => request.responseTruncation],
+    ["text.verbosity", (request) => request.responseTextVerbosity],
+    ["include", (request) => request.providerMetadata?.openai?.responsesOutputTextLogprobs],
+    ["top_logprobs", (request) => request.providerMetadata?.openai?.responsesTopLogprobs],
+]
+
+type NativeResponsesRequest = NonNullable<NonNullable<CanonicalRequest["nativeRequest"]>["openaiResponses"]>
+
+const collectNativeResponsesReasons = (native: NativeResponsesRequest): string[] => {
+    const reasons: string[] = []
+    const toolTypes = new Set<string>()
+
+    for (const tool of native.tools ?? []) {
+        if (tool && typeof tool === "object" && "type" in tool && typeof tool.type === "string") {
+            toolTypes.add(tool.type)
+        }
+    }
+
+    if (toolTypes.size > 0) {
+        reasons.push(`tools: ${[...toolTypes].join(", ")}`)
+    }
+
+    const inputTypes = new Set<string>()
+    const input = native.input
+
+    if (Array.isArray(input)) {
+        for (const item of input) {
+            if (!item || typeof item !== "object") {
+                continue
+            }
+
+            const itemType = "type" in item && typeof item.type === "string"
+                ? item.type
+                : undefined
+            if (itemType && itemType !== "message") {
+                inputTypes.add(itemType)
+            }
+
+            if (!("content" in item) || !Array.isArray(item.content)) {
+                continue
+            }
+
+            for (const block of item.content) {
+                if (
+                    block
+                    && typeof block === "object"
+                    && "type" in block
+                    && typeof block.type === "string"
+                    && block.type !== "input_text"
+                    && block.type !== "output_text"
+                ) {
+                    inputTypes.add(block.type)
+                }
+            }
+        }
+    }
+
+    if (inputTypes.size > 0) {
+        reasons.push(`input: ${[...inputTypes].slice(0, 6).join(", ")}`)
+    }
+
+    if (native.include?.includes("reasoning.encrypted_content")) {
+        reasons.push("include: reasoning.encrypted_content")
+    }
+
+    if (reasons.length === 0) {
+        reasons.push("native Responses payload")
+    }
+
+    return reasons
+}
+
+const describeChannelForError = (config: Partial<ChannelConfig>): string => {
+    const name = config.name || "unnamed"
+    const type = config.type || "unknown"
+
+    return config.channel_key
+        ? `Channel "${name}" (key: ${config.channel_key}, type: ${type})`
+        : `Channel "${name}" (type: ${type})`
+}
+
+/**
+ * Rejects requests carrying semantics the conversion target cannot express, naming the
+ * offending features, the channel, and its protocols so the operator can fix routing.
+ */
 const assertConversionSupported = (
     canonical: CanonicalRequest,
-    upstreamProtocol: UpstreamProtocol,
+    targetProtocol: UpstreamProtocol,
+    config: Partial<ChannelConfig>,
+    supportedProtocols: UpstreamProtocol[],
 ): void => {
-    if (upstreamProtocol === "openai-responses") {
+    if (targetProtocol === "openai-responses") {
         return
     }
 
-    if (canonical.nativeRequest?.openaiResponses !== undefined) {
-        throw createUnsupportedSemanticsError(
-            "This request relies on OpenAI Responses semantics that cannot be converted to the selected channel protocol"
-        )
+    const fieldReasons = OPENAI_RESPONSES_ONLY_FIELDS
+        .filter(([, getValue]) => getValue(canonical) !== undefined)
+        .map(([field]) => field)
+    const param = fieldReasons[0]
+    const reasons: string[] = []
+    let semantics = "OpenAI Responses"
+    let code = "request_unsupported_openai_semantics"
+
+    const nativeResponses = canonical.nativeRequest?.openaiResponses
+    if (nativeResponses !== undefined) {
+        reasons.push(...collectNativeResponsesReasons(nativeResponses))
     }
 
     if (
-        upstreamProtocol !== "anthropic-messages"
+        targetProtocol !== "anthropic-messages"
         && canonical.nativeRequest?.anthropicMessages !== undefined
     ) {
-        throw createUnsupportedSemanticsError(
-            "This request relies on Anthropic Messages semantics that cannot be converted to the selected channel protocol"
-        )
+        semantics = "Anthropic Messages"
+        code = "request_unsupported_anthropic_semantics"
+        reasons.push("native Anthropic Messages content blocks")
     }
 
-    const openAIResponsesOnlyFields: Array<[string, unknown]> = [
-        ["previous_response_id", canonical.previousResponseId],
-        ["conversation", canonical.conversationId],
-        ["prompt", canonical.prompt],
-        ["reasoning.summary", canonical.reasoningSummary],
-        ["truncation", canonical.responseTruncation],
-        ["text.verbosity", canonical.responseTextVerbosity],
-        ["include", canonical.providerMetadata?.openai?.responsesOutputTextLogprobs],
-        ["top_logprobs", canonical.providerMetadata?.openai?.responsesTopLogprobs],
-    ]
-    const usedField = openAIResponsesOnlyFields.find(([, value]) => value !== undefined)
+    reasons.push(...fieldReasons)
 
-    if (usedField) {
-        throw createUnsupportedSemanticsError(
-            `"${usedField[0]}" requires an OpenAI Responses compatible channel`
-        )
+    if (reasons.length === 0) {
+        return
     }
+
+    throw createUnsupportedSemanticsError(
+        `This request uses ${semantics} semantics that cannot be converted to "${targetProtocol}". `
+        + `Unsupported features: ${reasons.join(", ")}. `
+        + `${describeChannelForError(config)} supports: ${supportedProtocols.join(", ")}; `
+        + `conversion target: "${targetProtocol}". `
+        + `Enable ${semantics} for this channel, or route this model to a channel that supports it.`,
+        code,
+        param,
+    )
 }
 
 /**
@@ -413,14 +520,16 @@ export default {
         trackingState: RequestTrackingState,
         routeId: RouteId,
     ): Promise<Response> {
-        const descriptor = getChannelProtocolDescriptor(config.type)
-        const upstreamProtocol = descriptor?.protocol
+        const targetProtocol = resolvePrimaryProtocol(config)
 
-        if (!descriptor || !upstreamProtocol) {
+        if (!targetProtocol) {
             trackingState.upstreamStatus = 500
-            trackingState.errorSummary = "Channel type does not support protocol conversion"
+            trackingState.errorSummary = "Channel has no upstream protocol available for conversion"
             return buildErrorResponse(routeId, createConversionNotRequiredError())
         }
+
+        const descriptor = resolveProtocolDescriptor(config, targetProtocol)
+        const upstreamProtocol = targetProtocol
 
         const geminiTarget = routeId === "gemini-generate-content"
             ? parseGeminiRouteTarget(new URL(c.req.url).pathname)
@@ -430,7 +539,12 @@ export default {
         let canonical: CanonicalRequest
         try {
             canonical = parseClientRequest(routeId, requestBody, isStream)
-            assertConversionSupported(canonical, upstreamProtocol)
+            assertConversionSupported(
+                canonical,
+                targetProtocol,
+                config,
+                resolveChannelProtocols(config),
+            )
         } catch (error) {
             const payloadError = error instanceof GatewayError
                 ? error
@@ -438,10 +552,11 @@ export default {
 
             trackingState.upstreamStatus = payloadError.httpStatus
             trackingState.errorSummary = payloadError.message
+            trackingState.lastErrorCode = payloadError.code
             return buildErrorResponse(routeId, payloadError)
         }
 
-        const base = resolveUpstreamBase(config)
+        const base = resolveUpstreamBase(config, targetProtocol)
         const adapter = createAdapter(descriptor, config, base.baseUrl, config.api_key || "")
         const requestId = crypto.randomUUID()
         const providerContext: ProviderRequestContext = {

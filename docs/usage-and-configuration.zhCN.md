@@ -289,7 +289,9 @@ Azure 渠道默认直接走资源主机的 Azure OpenAI v1 路径（`/openai/v1/
 
 - `name`：渠道显示名称
 - `type`：服务商类型，支持 `openai`、`gemini-native`、`azure-openai`、`claude`、`openai-responses`、`azure-openai-responses`、`openai-audio`、`azure-openai-audio`
-- 协议转换：`/v1/chat/completions`、`/v1/messages`、`/v1/responses`、`/v1beta/models/*` 均接受任意文本渠道类型；客户端协议与渠道协议一致时原样转发，保留请求体、服务商原生字段、图片与 SSE 帧。协议不一致时，请求与响应（含 SSE 流）自动转换。仅 Responses 支持的字段（`previous_response_id`、会话、prompt、Responses 原生工具）需要 Responses 渠道；多模态内容不参与转换，需使用同协议渠道。
+- `protocols`：该渠道原生支持的协议（`openai-chat`、`openai-responses`、`anthropic-messages`、`gemini-generate-content`）。命中支持协议时原样转发，保留请求体、服务商原生字段、图片与 SSE 帧。除音频外的文本渠道可声明全部四种协议；Azure 文本类型仅支持 `openai-chat` 与 `openai-responses`。未配置时使用渠道类型的默认值（`openai`/`azure-openai` → `openai-chat`，`openai-responses`/`azure-openai-responses` → `openai-responses`，`claude` → `anthropic-messages`，`gemini-native` → `gemini-generate-content`）。
+- `primary_protocol`：入站协议不在 `protocols` 中时的转换目标，必须属于已声明的协议；默认取第一个已声明协议，否则取渠道类型默认值。
+- 协议转换：`/v1/chat/completions`、`/v1/messages`、`/v1/responses`、`/v1beta/models/*` 均接受任意文本渠道类型；客户端协议与渠道协议一致时原样转发。协议不一致时，请求与响应（含 SSE 流）转换为 `primary_protocol`。仅 Responses 支持的字段（`previous_response_id`、会话、prompt、Responses 原生工具）无法转换；此时网关会改用原生支持该入站协议的其它渠道重试，仅当没有此类渠道时返回 `400`，`error.code` 为 `request_unsupported_openai_semantics`，并给出不支持的字段、`error.param`，以及渠道名称、key、支持协议与转换目标。
 - `endpoint`：API 端点地址（末尾加 `#` 可跳过自动路径拼接并原样请求该 URL，原样转发与协议转换均生效）
 - `enabled`：是否参与路由（默认 `true`）
 - `weight`：权重优先级（`0`–`5`，默认 `0`）

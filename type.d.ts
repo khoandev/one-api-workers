@@ -51,6 +51,12 @@ type ApiTokenRow = BaseDbRow & {
     usage: number; // 原始计费单位整数
 }
 
+type ChannelProtocol =
+    | "openai-chat"
+    | "openai-responses"
+    | "anthropic-messages"
+    | "gemini-generate-content";
+
 type ChannelType =
     | "azure-openai"
     | "openai"
@@ -82,6 +88,10 @@ type ChannelConfig = {
     auto_rotate?: boolean;
     models?: ChannelModelMapping[];
     supported_models?: string[];
+    protocols?: ChannelProtocol[];
+    primary_protocol?: ChannelProtocol | null;
+    /** Runtime-only identity injected by the retry layer; never persisted. */
+    channel_key?: string;
     deployment_mapper?: Record<string, string>;
     model_pricing?: Record<string, ModelPricing>;
 }
@@ -166,6 +176,7 @@ type RequestTrackingState = {
     retryCount: number;
     upstreamStatus?: number;
     errorSummary?: string;
+    lastErrorCode?: string;
 }
 
 type AdminLoginChallengeRow = BaseDbRow & {

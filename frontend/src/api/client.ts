@@ -84,10 +84,15 @@ async function responseInterceptor(response: Response, behavior: RequestBehavior
     try {
       // 尝试解析为 JSON
       const errorData = JSON.parse(responseText)
+      const nestedError = errorData?.error
       if (typeof errorData?.message === 'string') {
         errorMessage = errorData.message
-      } else if (typeof errorData?.error === 'string') {
-        errorMessage = errorData.error
+      } else if (typeof nestedError === 'string') {
+        errorMessage = nestedError
+      } else if (nestedError && typeof nestedError === 'object' && typeof nestedError.message === 'string') {
+        const code = typeof nestedError.code === 'string' ? ` [${nestedError.code}]` : ''
+        const param = typeof nestedError.param === 'string' ? ` (param: ${nestedError.param})` : ''
+        errorMessage = `${nestedError.message}${code}${param}`
       } else {
         errorMessage = JSON.stringify(errorData)
       }

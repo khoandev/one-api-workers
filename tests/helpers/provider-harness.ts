@@ -82,7 +82,13 @@ export type ProviderRun = {
 }
 
 export const runProvider = async (options: RunProviderOptions): Promise<ProviderRun> => {
-    const provider = getProvider(options.routeId, options.type ?? "")
+    const channelConfig = {
+        name: "test",
+        endpoint: "",
+        ...options.config,
+        type: options.type,
+    } as ChannelConfig
+    const provider = getProvider(options.routeId, channelConfig)
     if (!provider) {
         throw new Error(`No provider for route ${options.routeId} and channel type ${options.type}`)
     }
@@ -108,7 +114,7 @@ export const runProvider = async (options: RunProviderOptions): Promise<Provider
 
     const response = await provider(
         context,
-        { name: "test", endpoint: "", ...options.config, type: options.type } as ChannelConfig,
+        channelConfig,
         options.requestBody ?? {},
         saveUsage,
         trackingState,

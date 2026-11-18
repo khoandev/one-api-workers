@@ -12,6 +12,14 @@ import {
 import { invalidateChannelCache } from "../providers/shared/auth";
 import { buildAzureTargetUrlFromPath } from "../providers/shared/azure-target-url";
 import { buildPrefixedTargetUrl } from "../providers/shared/prefixed-target-url";
+import { getAllowedChannelProtocols } from "../providers/shared/protocol-registry";
+
+const CHANNEL_PROTOCOL_SCHEMA = z.enum([
+    "openai-chat",
+    "openai-responses",
+    "anthropic-messages",
+    "gemini-generate-content",
+]);
 
 const ChannelModelSchema = z.object({
     id: z.string().describe('Upstream model ID'),
@@ -194,6 +202,8 @@ export class ChannelUpsertEndpoint extends OpenAPIRoute {
                             auto_rotate: z.boolean().optional().describe('When retrying, randomly rotate to other API keys in the same channel'),
                             models: z.array(ChannelModelSchema).optional().describe('External model name to upstream model ID mappings'),
                             supported_models: z.array(z.string()).optional().describe('Deprecated supported request model list'),
+                            protocols: z.array(CHANNEL_PROTOCOL_SCHEMA).optional().describe('Upstream protocols this channel serves natively; other protocols are converted to primary_protocol'),
+                            primary_protocol: CHANNEL_PROTOCOL_SCHEMA.optional().describe('Conversion target when the incoming protocol is not supported natively'),
                             deployment_mapper: z.record(z.string(), z.string()).optional().describe('Deprecated model deployment mapping'),
                             model_pricing: z.record(z.string(), z.object({
                                 billingMode: z.enum(["volume", "request"]).optional().describe('Billing mode: volume = per 1M tokens, request = fixed per successful response'),
@@ -216,6 +226,27 @@ export class ChannelUpsertEndpoint extends OpenAPIRoute {
     async handle(c: Context<HonoCustomType>) {
         const { key } = c.req.param();
         const rawConfig = await c.req.json<ChannelConfig>();
+        const requestedProtocols = Array.isArray(rawConfig.protocols) ? rawConfig.protocols : [];
+        const allowedProtocols = getAllowedChannelProtocols(rawConfig.type);
+        const invalidProtocol = requestedProtocols.find((protocol) => {
+            return !allowedProtocols.includes(protocol);
+        });
+
+        if (invalidProtocol) {
+            return c.text(
+                `Protocol not supported for channel type ${rawConfig.type ?? "unknown"}: ${invalidProtocol}`,
+                400,
+            );
+        }
+
+        if (
+            rawConfig.primary_protocol
+            && requestedProtocols.length > 0
+            && !requestedProtocols.includes(rawConfig.primary_protocol)
+        ) {
+            return c.text('primary_protocol must be included in protocols', 400);
+        }
+
         const config = sanitizeChannelConfig(rawConfig);
 
         if (!config.name || !config.endpoint) {
@@ -270,6 +301,8 @@ export class ChannelFetchModelsEndpoint extends OpenAPIRoute {
                             auto_rotate: z.boolean().optional(),
                             models: z.array(ChannelModelSchema).optional(),
                             supported_models: z.array(z.string()).optional(),
+                            protocols: z.array(CHANNEL_PROTOCOL_SCHEMA).optional(),
+                            primary_protocol: CHANNEL_PROTOCOL_SCHEMA.optional(),
                             deployment_mapper: z.record(z.string(), z.string()).optional(),
                             model_pricing: z.record(z.string(), z.object({
                                 billingMode: z.enum(["volume", "request"]).optional(),

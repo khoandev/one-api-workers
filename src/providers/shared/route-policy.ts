@@ -1,6 +1,6 @@
 import {
-    getChannelProtocolDescriptor,
     isAudioChannelType,
+    resolveChannelProtocols,
 } from "./protocol-registry"
 
 export type RouteId =
@@ -79,11 +79,11 @@ export const resolveRouteId = (pathname: string): RouteId | null => {
  */
 export const isChannelAllowedForRoute = (
     routeId: RouteId,
-    config: Pick<ChannelConfig, "type" | "endpoint">,
+    config: Partial<ChannelConfig>,
 ): boolean => {
     if (routeId === "audio-speech") {
         return isAudioChannelType(config.type)
     }
 
-    return getChannelProtocolDescriptor(config.type) !== undefined
+    return resolveChannelProtocols(config).length > 0
 }

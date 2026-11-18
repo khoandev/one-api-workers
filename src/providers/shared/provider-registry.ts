@@ -2,7 +2,11 @@ import { Context } from "hono"
 
 import passthroughProxy from "../passthrough-proxy"
 import protocolConversion from "../protocol-conversion"
-import { getChannelProtocolDescriptor, getRouteProtocol } from "./protocol-registry"
+import {
+    channelSupportsProtocol,
+    getRouteProtocol,
+    resolveChannelProtocols,
+} from "./protocol-registry"
 import type { RouteId } from "./route-policy"
 
 export type ProviderFetch = (
@@ -15,22 +19,23 @@ export type ProviderFetch = (
 ) => Promise<Response>
 
 /**
- * Audio routes and same-protocol text channels forward the request verbatim;
+ * Audio routes and text protocols the channel serves natively forward verbatim;
  * only a protocol mismatch goes through conversion.
  */
-export const getProvider = (routeId: RouteId, type: string): ProviderFetch | undefined => {
+export const getProvider = (
+    routeId: RouteId,
+    config: Partial<ChannelConfig>,
+): ProviderFetch | undefined => {
     if (routeId === "audio-speech") {
         return passthroughProxy.fetch
     }
 
-    const descriptor = getChannelProtocolDescriptor(type)
-    if (!descriptor) {
+    const routeProtocol = getRouteProtocol(routeId)
+    if (!routeProtocol || resolveChannelProtocols(config).length === 0) {
         return undefined
     }
 
-    if (descriptor.protocol === getRouteProtocol(routeId)) {
-        return passthroughProxy.fetch
-    }
-
-    return protocolConversion.fetch
+    return channelSupportsProtocol(config, routeProtocol)
+        ? passthroughProxy.fetch
+        : protocolConversion.fetch
 }

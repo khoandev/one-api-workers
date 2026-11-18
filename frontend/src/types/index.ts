@@ -11,10 +11,18 @@ export interface ChannelModelMapping {
   default_params?: Record<string, unknown>
 }
 
+export type ChannelProtocol =
+  | 'openai-chat'
+  | 'openai-responses'
+  | 'anthropic-messages'
+  | 'gemini-generate-content'
+
 export interface ChannelConfig {
   name: string
   type: 'openai' | 'gemini-native' | 'azure-openai' | 'openai-audio' | 'azure-openai-audio' | 'claude' | 'openai-responses' | 'azure-openai-responses'
   endpoint: string
+  protocols?: ChannelProtocol[]
+  primary_protocol?: ChannelProtocol
   enabled?: boolean
   weight?: number
   api_key?: string

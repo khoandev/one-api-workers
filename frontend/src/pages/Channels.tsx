@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { apiClient } from "@/api/client";
-import { Channel, ChannelConfig, ChannelModelMapping } from "@/types";
+import { Channel, ChannelConfig, ChannelModelMapping, ChannelProtocol } from "@/types";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
@@ -56,6 +56,42 @@ const channelTypes = [
   { value: "azure-openai-responses", label: "Azure OpenAI Responses" },
 ];
 
+const channelProtocolOptions: Array<{ value: ChannelProtocol; labelKey: string }> = [
+  { value: "openai-chat", labelKey: "channels.protocolOpenAIChat" },
+  { value: "openai-responses", labelKey: "channels.protocolOpenAIResponses" },
+  { value: "anthropic-messages", labelKey: "channels.protocolAnthropicMessages" },
+  { value: "gemini-generate-content", labelKey: "channels.protocolGemini" },
+];
+
+const defaultChannelProtocols: Record<string, ChannelProtocol[]> = {
+  openai: ["openai-chat"],
+  "openai-responses": ["openai-responses"],
+  claude: ["anthropic-messages"],
+  "gemini-native": ["gemini-generate-content"],
+  "azure-openai": ["openai-chat"],
+  "azure-openai-responses": ["openai-responses"],
+};
+
+const isAudioChannelType = (type: string | undefined): boolean => {
+  return type === "openai-audio" || type === "azure-openai-audio";
+};
+
+const isAzureChannelType = (type: string | undefined): boolean => {
+  return ["azure-openai", "azure-openai-audio", "azure-openai-responses"].includes(type || "");
+};
+
+const getAllowedProtocols = (type: string | undefined): ChannelProtocol[] => {
+  if (!type || isAudioChannelType(type)) {
+    return [];
+  }
+
+  if (type === "azure-openai" || type === "azure-openai-responses") {
+    return ["openai-chat", "openai-responses"];
+  }
+
+  return channelProtocolOptions.map((option) => option.value);
+};
+
 const channelWeightOptions = Array.from({ length: 6 }, (_, weight) => ({
   value: weight,
   label: String(weight),
@@ -77,6 +113,8 @@ const createDefaultChannelFormData = (): ChannelConfig => ({
   auto_retry: true,
   auto_rotate: true,
   models: [],
+  protocols: ["openai-chat"],
+  primary_protocol: "openai-chat",
 });
 
 const normalizeChannelWeight = (weight: number | undefined): number => {
@@ -202,6 +240,16 @@ const normalizeChannelFormConfig = (config: ChannelConfig): ChannelConfig => {
   const rawApiKeys = Array.isArray(config.api_keys) ? config.api_keys : [];
   const mergedKeys = parseApiKeys([legacyApiKey, ...rawApiKeys].join("\n"));
   const models = getChannelModels(config);
+  const allowedProtocols = getAllowedProtocols(config.type);
+  const declaredProtocols = Array.isArray(config.protocols)
+    ? config.protocols.filter((protocol) => allowedProtocols.includes(protocol))
+    : [];
+  const protocols = declaredProtocols.length > 0
+    ? declaredProtocols
+    : (defaultChannelProtocols[config.type ?? ""] ?? []).filter((protocol) => allowedProtocols.includes(protocol));
+  const primaryProtocol = config.primary_protocol && protocols.includes(config.primary_protocol)
+    ? config.primary_protocol
+    : protocols[0];
 
   return {
     ...config,
@@ -212,6 +260,8 @@ const normalizeChannelFormConfig = (config: ChannelConfig): ChannelConfig => {
     auto_retry: config.auto_retry ?? true,
     auto_rotate: config.auto_rotate ?? true,
     models,
+    protocols,
+    primary_protocol: primaryProtocol,
     supported_models: undefined,
     deployment_mapper: undefined,
   };
@@ -428,31 +478,18 @@ const joinPath = (...segments: string[]): string => {
   return `/${cleanedSegments.join("/")}`;
 };
 
-const getChannelRequestPreviewPath = (type: string | undefined): string => {
-  switch (type) {
-    case "claude":
-      return "/v1/messages";
-    case "openai-audio":
-    case "azure-openai-audio":
-      return "/v1/audio/speech";
+const getProtocolRequestPreviewPath = (protocol?: ChannelProtocol): string => {
+  switch (protocol) {
     case "openai-responses":
-    case "azure-openai-responses":
       return "/v1/responses";
-    case "gemini-native":
+    case "anthropic-messages":
+      return "/v1/messages";
+    case "gemini-generate-content":
       return "/models/{model}:generateContent";
-    case "openai":
-    case "azure-openai":
+    case "openai-chat":
     default:
       return "/v1/chat/completions";
   }
-};
-
-const isOpenAIStyleChannelType = (type: string | undefined): boolean => {
-  return ["openai", "openai-audio", "openai-responses"].includes(type || "");
-};
-
-const isAzureChannelType = (type: string | undefined): boolean => {
-  return ["azure-openai", "azure-openai-audio", "azure-openai-responses"].includes(type || "");
 };
 
 const buildPrefixedEndpointPreview = (endpoint: string, requestPath: string, prefixToStrip = "/v1"): string => {
@@ -492,10 +529,6 @@ const buildAzureEndpointPreview = (endpoint: string, requestPath: string): strin
   return targetUrl.toString();
 };
 
-const buildClaudeEndpointPreview = (endpoint: string, requestPath: string): string => {
-  return buildPrefixedEndpointPreview(endpoint, requestPath);
-};
-
 const buildGeminiNativeEndpointPreview = (endpoint: string, requestPath: string): string => {
   const targetUrl = new URL(endpoint);
   const currentBasePath = trimSlashes(targetUrl.pathname);
@@ -528,19 +561,21 @@ const getChannelEndpointPlaceholder = (type: string | undefined): string => {
   }
 };
 
-const getChannelEndpointPreview = (type: string | undefined, endpoint: string): string => {
+const getChannelEndpointPreview = (
+  type: string | undefined,
+  endpoint: string,
+  protocol?: ChannelProtocol,
+): string => {
   const trimmedEndpoint = endpoint.trim();
-  const requestPath = getChannelRequestPreviewPath(type);
+  const audioChannel = isAudioChannelType(type);
+  const requestPath = audioChannel ? "/v1/audio/speech" : getProtocolRequestPreviewPath(protocol);
+
   if (!trimmedEndpoint) {
     return requestPath;
   }
 
   try {
-    if (type === "claude") {
-      return buildClaudeEndpointPreview(trimmedEndpoint, requestPath);
-    }
-
-    if (type === "gemini-native") {
+    if (!audioChannel && protocol === "gemini-generate-content") {
       return buildGeminiNativeEndpointPreview(trimmedEndpoint, requestPath);
     }
 
@@ -548,14 +583,10 @@ const getChannelEndpointPreview = (type: string | undefined, endpoint: string): 
       return buildAzureEndpointPreview(trimmedEndpoint, requestPath);
     }
 
-    if (isOpenAIStyleChannelType(type)) {
-      return buildPrefixedEndpointPreview(trimmedEndpoint, requestPath);
-    }
+    return buildPrefixedEndpointPreview(trimmedEndpoint, requestPath);
   } catch {
     return buildFallbackEndpointPreview(trimmedEndpoint, requestPath);
   }
-
-  return buildFallbackEndpointPreview(trimmedEndpoint, requestPath);
 };
 
 export function Channels({ createMode = false, editRoute = false }: { createMode?: boolean; editRoute?: boolean }) {
@@ -1133,7 +1164,11 @@ export function Channels({ createMode = false, editRoute = false }: { createMode
       channel.key.toLowerCase().includes(normalizedSearchQuery)
     );
   });
-  const endpointPreview = getChannelEndpointPreview(formData.type, formData.endpoint);
+  const endpointPreview = getChannelEndpointPreview(
+    formData.type,
+    formData.endpoint,
+    formData.primary_protocol ?? undefined,
+  );
   const endpointPlaceholder = getChannelEndpointPlaceholder(formData.type);
   const renderModelSummaryBadge = (modelSummary: string, modelTooltipText: string, className: string) => {
     const badge = (
@@ -1470,7 +1505,16 @@ export function Channels({ createMode = false, editRoute = false }: { createMode
                       </Label>
                       <Select
                         value={formData.type}
-                        onChange={(e) => setFormData({ ...formData, type: e.target.value as ChannelConfig["type"] })}
+                        onChange={(e) => {
+                          const nextType = e.target.value as ChannelConfig["type"];
+                          const nextProtocols = defaultChannelProtocols[nextType ?? ""] ?? [];
+                          setFormData({
+                            ...formData,
+                            type: nextType,
+                            protocols: nextProtocols,
+                            primary_protocol: nextProtocols[0],
+                          });
+                        }}
                       >
                         {channelTypes.map((type) => (
                           <option key={type.value} value={type.value}>
@@ -1520,6 +1564,74 @@ export function Channels({ createMode = false, editRoute = false }: { createMode
                   </div>
                 </CardContent>
               </Card>
+
+              {getAllowedProtocols(formData.type).length > 0 && (
+                <Card>
+                  <CardContent className="p-5">
+                    <div className="mb-4">
+                      <h3 className="font-medium flex items-center gap-2">
+                        <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
+                        {t("channels.protocolSupport")}
+                      </h3>
+                      <p className="text-xs text-muted-foreground mt-1">{t("channels.protocolSupportHint")}</p>
+                    </div>
+                    <div className="space-y-3">
+                      {channelProtocolOptions
+                        .filter((option) => getAllowedProtocols(formData.type).includes(option.value))
+                        .map((option) => (
+                          <label key={option.value} className="flex items-start gap-3 cursor-pointer">
+                            <Checkbox
+                              className="mt-0.5"
+                              checked={(formData.protocols ?? []).includes(option.value)}
+                              onCheckedChange={(checked) => {
+                                const currentProtocols = formData.protocols ?? [];
+                                if (!checked && currentProtocols.length <= 1) {
+                                  addToast(t("channels.protocolRequired"), "error");
+                                  return;
+                                }
+
+                                const nextProtocols = checked
+                                  ? [...currentProtocols, option.value]
+                                  : currentProtocols.filter((protocol) => protocol !== option.value);
+                                const nextPrimaryProtocol = !checked
+                                  && formData.primary_protocol === option.value
+                                  ? nextProtocols[0]
+                                  : formData.primary_protocol;
+                                setFormData({
+                                  ...formData,
+                                  protocols: nextProtocols,
+                                  primary_protocol: nextPrimaryProtocol,
+                                });
+                              }}
+                            />
+                            <span className="text-sm">{t(option.labelKey)}</span>
+                          </label>
+                        ))}
+                    </div>
+                    <div className="mt-4 space-y-2">
+                      <Label className="text-sm">{t("channels.primaryProtocol")}</Label>
+                      <Select
+                        value={formData.primary_protocol ?? ""}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            primary_protocol: e.target.value as ChannelProtocol,
+                          })
+                        }
+                      >
+                        {channelProtocolOptions
+                          .filter((option) => (formData.protocols ?? []).includes(option.value))
+                          .map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {t(option.labelKey)}
+                            </option>
+                          ))}
+                      </Select>
+                      <p className="text-xs text-muted-foreground">{t("channels.primaryProtocolHint")}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
 
               <Card>
                 <CardContent className="p-5">

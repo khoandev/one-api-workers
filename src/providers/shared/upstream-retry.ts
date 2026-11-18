@@ -14,6 +14,11 @@ import {
     ResolvedChannelCandidate,
 } from "./channel-resolver";
 import {
+    channelSupportsProtocol,
+    getRouteProtocol,
+    type UpstreamProtocol,
+} from "./protocol-registry";
+import {
     getProvider,
     ProviderFetch,
 } from "./provider-registry";
@@ -27,6 +32,13 @@ type ChannelExecutionResult = {
     shouldFallback: boolean
     errorCode: string
     errorSummary?: string
+}
+
+const CONVERSION_ERROR_CODE_PREFIX = "request_unsupported_";
+
+const readConversionErrorCode = (trackingState: RequestTrackingState): string | undefined => {
+    const errorCode = trackingState.lastErrorCode;
+    return errorCode?.startsWith(CONVERSION_ERROR_CODE_PREFIX) ? errorCode : undefined;
 }
 
 const pickRandomItem = <T>(items: T[]): T => {
@@ -123,10 +135,15 @@ const pickRetryKey = (
 const pickNextFallbackChannel = (
     channels: ResolvedChannelCandidate[],
     attemptedChannelKeys: Set<string>,
-    routing: ChannelRoutingConfig
+    routing: ChannelRoutingConfig,
+    requireProtocol: UpstreamProtocol | null = null
 ): ResolvedChannelCandidate | null => {
     const remainingChannels = channels.filter((channel) => {
-        return !attemptedChannelKeys.has(channel.key);
+        if (attemptedChannelKeys.has(channel.key)) {
+            return false;
+        }
+
+        return !requireProtocol || channelSupportsProtocol(channel.config, requireProtocol);
     });
 
     if (remainingChannels.length === 0) {
@@ -174,10 +191,12 @@ export const executeChannelWithRetries = async (
         try {
             const runtimeConfig: ChannelConfig = {
                 ...config,
+                channel_key: channel.key,
                 api_key: currentKey,
                 api_keys: [currentKey],
             };
 
+            delete trackingState.lastErrorCode;
             const response = await provider(
                 c,
                 runtimeConfig,
@@ -186,6 +205,17 @@ export const executeChannelWithRetries = async (
                 trackingState,
                 routeId,
             );
+
+            const conversionErrorCode = readConversionErrorCode(trackingState);
+            if (!response.ok && conversionErrorCode) {
+                // The request, not the channel, is unsupported: skip key retries and cooldown.
+                return {
+                    response,
+                    shouldFallback: true,
+                    errorCode: conversionErrorCode,
+                    errorSummary: trackingState.errorSummary,
+                };
+            }
 
             if (response.ok) {
                 markChannelSuccess(channel.key);
@@ -281,6 +311,7 @@ export const executeWithFallbackChannels = async (
     routing: ChannelRoutingConfig,
 ): Promise<Response> => {
     const attemptedChannelKeys = new Set<string>();
+    const routeProtocol = getRouteProtocol(routeId);
     let currentChannel = initialChannel;
     let fallbackCount = 0;
 
@@ -289,7 +320,7 @@ export const executeWithFallbackChannels = async (
         setActiveChannel(currentChannel);
         trackingState.errorSummary = undefined;
 
-        const provider = getProvider(routeId, currentChannel.config.type || "");
+        const provider = getProvider(routeId, currentChannel.config);
         if (!provider) {
             const errorSummary = "Channel type not supported";
             const response = c.text(errorSummary, 400);
@@ -333,8 +364,11 @@ export const executeWithFallbackChannels = async (
             return execution.response;
         }
 
+        const requiredProtocol = execution.errorCode.startsWith(CONVERSION_ERROR_CODE_PREFIX)
+            ? routeProtocol
+            : null;
         const nextChannel = execution.shouldFallback && fallbackCount < routing.maxFallbacks
-            ? pickNextFallbackChannel(channels, attemptedChannelKeys, routing)
+            ? pickNextFallbackChannel(channels, attemptedChannelKeys, routing, requiredProtocol)
             : null;
 
         if (!nextChannel) {
