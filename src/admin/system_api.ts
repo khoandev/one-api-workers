@@ -26,10 +26,20 @@ const apiDocsConfigSchema = z.object({
     enabled: z.boolean(),
 });
 
+const channelRoutingConfigSchema = z.object({
+    strategy: z.enum(["priority", "weighted", "round-robin"]),
+    maxRetries: z.number().int().min(0).max(10),
+    maxFallbacks: z.number().int().min(0).max(10),
+    retryBackoffMs: z.number().int().min(0).max(5000),
+    cooldownMs: z.number().int().min(0).max(300000),
+    retryStatusCodes: z.array(z.number().int().min(100).max(599)),
+});
+
 const systemConfigSchema = z.object({
     displayDecimals: z.number().int().min(0).max(9),
     adminSecurity: adminSecurityConfigSchema,
     apiDocs: apiDocsConfigSchema,
+    routing: channelRoutingConfigSchema.optional(),
 });
 
 const telegramTestRequestSchema = z.object({

@@ -1,6 +1,8 @@
 import { Context } from "hono"
 
 import { cachedValue, invalidateCached } from "../../cache"
+import { normalizeChannelConfig } from "../../channel-config"
+import type { NormalizedChannelConfig } from "../../channel-config"
 import type { RouteId } from "./route-policy"
 
 const CHANNEL_CACHE_KEY = "channel_config:all";
@@ -72,17 +74,47 @@ export const invalidateChannelCache = (c: Context<HonoCustomType>): void => {
     invalidateCached(c.env.DB, CHANNEL_CACHE_KEY);
 }
 
-const loadAllChannels = (c: Context<HonoCustomType>) => {
-    return c.env.DB.prepare(
+export type ChannelCatalogEntry = {
+    key: string;
+    config: NormalizedChannelConfig;
+}
+
+export type ChannelCatalog = {
+    results: ChannelCatalogEntry[];
+}
+
+/**
+ * Channel configs are parsed and normalized once per cache window instead of
+ * once per request per channel. Invalid rows are dropped here, so consumers
+ * only ever see compiled configs.
+ */
+const loadAllChannels = async (
+    c: Context<HonoCustomType>
+): Promise<ChannelCatalog> => {
+    const rows = await c.env.DB.prepare(
         `SELECT key, value FROM channel_config`
     ).all<ChannelConfigRow>();
+
+    const results: ChannelCatalogEntry[] = [];
+    for (const row of rows.results ?? []) {
+        try {
+            results.push({
+                key: row.key,
+                config: normalizeChannelConfig(JSON.parse(row.value) as ChannelConfig),
+            });
+        } catch (error) {
+            console.error(`Invalid channel config for key: ${row.key}`, error);
+        }
+    }
+
+    return { results };
 }
 
 export const fetchChannelsForToken = async (
     c: Context<HonoCustomType>,
     tokenData: ApiTokenData
-) => {
-    const result = await cachedValue(
+): Promise<ChannelCatalog> => {
+    const catalog = await cachedValue(
         c.env.DB,
         CHANNEL_CACHE_KEY,
         CHANNEL_CACHE_TTL_MS,
@@ -91,12 +123,11 @@ export const fetchChannelsForToken = async (
 
     const channelKeys = tokenData.channel_keys;
     if (!channelKeys || channelKeys.length === 0) {
-        return result;
+        return catalog;
     }
 
     const allowedKeys = new Set(channelKeys);
     return {
-        ...result,
-        results: (result.results ?? []).filter((row) => allowedKeys.has(row.key)),
+        results: catalog.results.filter((row) => allowedKeys.has(row.key)),
     };
 }

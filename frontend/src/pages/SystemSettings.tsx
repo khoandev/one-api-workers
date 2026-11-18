@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Bot, Check, FileText, Shield, SlidersHorizontal } from "lucide-react";
+import { Bot, Check, FileText, Shield, Shuffle, SlidersHorizontal } from "lucide-react";
 
 import { apiClient } from "@/api/client";
 import { Button } from "@/components/ui/button";
@@ -13,13 +13,15 @@ import { BILLING_CONFIG_QUERY_KEY } from "@/hooks/use-billing-config";
 import { SYSTEM_CONFIG_QUERY_KEY, useSystemConfig } from "@/hooks/use-system-config";
 import { PageContainer } from "@/components/ui/page-container";
 import {
+  DEFAULT_CHANNEL_ROUTING_CONFIG,
   DEFAULT_SYSTEM_CONFIG,
   PRECISION_OPTIONS,
   clearTelegramSecurityVerification,
   isTelegramSecurityVerified,
+  normalizeChannelRoutingConfig,
   normalizeSystemConfig,
 } from "@/lib/system-config";
-import type { SystemConfig } from "@/types";
+import type { ChannelRoutingConfig, SystemConfig } from "@/types";
 import { useTranslation } from "react-i18next";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
@@ -52,17 +54,52 @@ const formatSaveTime = (value: Date | null): string => {
   return `${hours}:${minutes}:${seconds}`;
 };
 
+type NumberSettingProps = {
+  id: string;
+  label: string;
+  hint: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  onChange: (value: number) => void;
+};
+
+function NumberSetting({ id, label, hint, value, min, max, step = 1, onChange }: NumberSettingProps) {
+  return (
+    <div className="space-y-2">
+      <label className="text-sm font-medium text-foreground" htmlFor={id}>
+        {label}
+      </label>
+      <Input
+        id={id}
+        type="number"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+      />
+      <p className="text-xs text-muted-foreground">{hint}</p>
+    </div>
+  );
+}
+
 export function SystemSettings() {
   const { t } = useTranslation();
   const [systemConfig, setSystemConfig] = useState(DEFAULT_SYSTEM_CONFIG);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const [retryCodesText, setRetryCodesText] = useState(() =>
+    DEFAULT_CHANNEL_ROUTING_CONFIG.retryStatusCodes.join(", "),
+  );
 
   const { addToast } = useToast();
   const queryClient = useQueryClient();
   const systemConfigQuery = useSystemConfig();
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasHydratedRef = useRef(false);
+  const hasHydratedRetryCodesRef = useRef(false);
   const lastSavedSignatureRef = useRef(buildSystemConfigSignature(DEFAULT_SYSTEM_CONFIG));
   const currentSignatureRef = useRef(buildSystemConfigSignature(DEFAULT_SYSTEM_CONFIG));
 
@@ -85,6 +122,36 @@ export function SystemSettings() {
     setLastSavedAt(new Date());
     setSystemConfig(normalized);
   }, [systemConfigQuery.data, systemConfigQuery.isFetched]);
+
+  // Hydrate the status code text once so later auto-saves never rewrite what the
+  // user is still typing.
+  useEffect(() => {
+    if (hasHydratedRetryCodesRef.current || !systemConfigQuery.isFetched || !systemConfigQuery.data) {
+      return;
+    }
+
+    hasHydratedRetryCodesRef.current = true;
+    setRetryCodesText(
+      normalizeChannelRoutingConfig(systemConfigQuery.data.routing).retryStatusCodes.join(", "),
+    );
+  }, [systemConfigQuery.data, systemConfigQuery.isFetched]);
+
+  const updateRouting = (patch: Partial<ChannelRoutingConfig>) => {
+    setSystemConfig((current) => ({
+      ...current,
+      routing: normalizeChannelRoutingConfig({ ...current.routing, ...patch }),
+    }));
+  };
+
+  const handleRetryCodesChange = (value: string) => {
+    setRetryCodesText(value);
+    updateRouting({
+      retryStatusCodes: value
+        .split(/[,\s]+/)
+        .map((part) => Number(part))
+        .filter((code) => Number.isInteger(code) && code >= 100 && code <= 599),
+    });
+  };
 
   const saveSystemConfigMutation = useMutation({
     mutationFn: async ({ config }: { config: SystemConfig; source: SaveSource; signature: string }) =>
@@ -346,6 +413,91 @@ export function SystemSettings() {
                 {telegramTestMutation.isPending ? t('settings.sendTestMessageSending') : t('settings.sendTestMessage')}
               </Button>
             </div>
+          </div>
+        </section>
+
+        <div className="h-px bg-border" />
+
+        <section className="space-y-4">
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 rounded-lg bg-muted-foreground/10 p-2 text-muted-foreground">
+              <Shuffle className="h-4 w-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h3 className="font-bold tracking-tight">{t('settings.routing')}</h3>
+              <p className="text-sm text-muted-foreground">{t('settings.routingDesc')}</p>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <span className="text-sm font-medium text-foreground">{t('settings.routingStrategy')}</span>
+            <div>
+              <ButtonGroup
+                aria-label={t('settings.routingStrategy')}
+                value={normalizedSystemConfig.routing.strategy}
+                options={[
+                  { label: t('settings.routingStrategyPriority'), value: "priority" as const },
+                  { label: t('settings.routingStrategyWeighted'), value: "weighted" as const },
+                  { label: t('settings.routingStrategyRoundRobin'), value: "round-robin" as const },
+                ]}
+                onValueChange={(value) => updateRouting({ strategy: value })}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">{t('settings.routingStrategyHint')}</p>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <NumberSetting
+              id="routingMaxRetries"
+              label={t('settings.maxRetries')}
+              hint={t('settings.maxRetriesHint')}
+              value={normalizedSystemConfig.routing.maxRetries}
+              min={0}
+              max={10}
+              onChange={(value) => updateRouting({ maxRetries: value })}
+            />
+            <NumberSetting
+              id="routingMaxFallbacks"
+              label={t('settings.maxFallbacks')}
+              hint={t('settings.maxFallbacksHint')}
+              value={normalizedSystemConfig.routing.maxFallbacks}
+              min={0}
+              max={10}
+              onChange={(value) => updateRouting({ maxFallbacks: value })}
+            />
+            <NumberSetting
+              id="routingRetryBackoffMs"
+              label={t('settings.retryBackoff')}
+              hint={t('settings.retryBackoffHint')}
+              value={normalizedSystemConfig.routing.retryBackoffMs}
+              min={0}
+              max={5000}
+              step={50}
+              onChange={(value) => updateRouting({ retryBackoffMs: value })}
+            />
+            <NumberSetting
+              id="routingCooldownMs"
+              label={t('settings.failureCooldown')}
+              hint={t('settings.failureCooldownHint')}
+              value={normalizedSystemConfig.routing.cooldownMs}
+              min={0}
+              max={300000}
+              step={1000}
+              onChange={(value) => updateRouting({ cooldownMs: value })}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-foreground" htmlFor="routingRetryStatusCodes">
+              {t('settings.retryStatusCodes')}
+            </label>
+            <Input
+              id="routingRetryStatusCodes"
+              value={retryCodesText}
+              placeholder="429, 500, 503"
+              onChange={(event) => handleRetryCodesChange(event.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">{t('settings.retryStatusCodesHint')}</p>
           </div>
         </section>
 

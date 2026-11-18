@@ -127,27 +127,41 @@ export const getChannelModels = (
         .filter((channelModel) => channelModel.enabled !== false);
 }
 
-export const findChannelModelMapping = (
-    config: Partial<Pick<ChannelConfig, "models" | "supported_models" | "deployment_mapper">>,
-    model: string
+/**
+ * Looks up an enabled model mapping on an already-normalized model list. Exact
+ * matches win over wildcards; disabled mappings never match.
+ */
+export const findModelMapping = (
+    models: ChannelModelMapping[],
+    model: string,
 ): ChannelModelMapping | null => {
-    const channelModels = getChannelModels(config);
-
-    // 精确匹配（大小写不敏感）
     const normalizedModel = model.toLowerCase();
-    for (const channelModel of channelModels) {
+    for (const channelModel of models) {
+        if (channelModel.enabled === false) {
+            continue;
+        }
         if (channelModel.name.toLowerCase() === normalizedModel) {
             return channelModel;
         }
     }
 
-    for (const channelModel of channelModels) {
+    for (const channelModel of models) {
+        if (channelModel.enabled === false) {
+            continue;
+        }
         if (channelModel.name.includes('*') && wildcardMatch(channelModel.name, model)) {
             return channelModel;
         }
     }
 
     return null;
+}
+
+export const findChannelModelMapping = (
+    config: Partial<Pick<ChannelConfig, "models" | "supported_models" | "deployment_mapper">>,
+    model: string
+): ChannelModelMapping | null => {
+    return findModelMapping(getChannelModels(config), model);
 }
 
 export const findSupportedModel = (

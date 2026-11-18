@@ -2,8 +2,7 @@ import { Context } from "hono";
 import { OpenAPIRoute } from "chanfana";
 import { z } from "zod";
 import { getApiKeyFromHeaders, fetchTokenData, fetchChannelsForToken } from "./shared/auth";
-import { getChannelModels, getJsonSetting } from "../utils";
-import { normalizeChannelConfig } from "../channel-config";
+import { getJsonSetting } from "../utils";
 import { TokenUtils } from "../admin/token_utils";
 import { CONSTANTS } from "../constants";
 
@@ -65,19 +64,15 @@ export class ModelsEndpoint extends OpenAPIRoute {
             : await getJsonSetting<Record<string, ModelPricing>>(c, CONSTANTS.MODEL_PRICING_KEY);
 
         for (const row of channelsResult.results) {
-            let config: ChannelConfig;
-
-            try {
-                config = normalizeChannelConfig(JSON.parse(row.value) as ChannelConfig);
-            } catch (error) {
-                console.error(`Invalid channel config for key: ${row.key}`, error);
-                continue;
-            }
+            const config = row.config;
 
             if (!config.enabled) {
                 continue;
             }
-            for (const model of getChannelModels(config)) {
+            for (const model of config.models) {
+                if (model.enabled === false) {
+                    continue;
+                }
                 if (!hasRemainingQuota && await TokenUtils.modelRequiresPaidQuota(c, model.name, config, globalPricing)) {
                     continue;
                 }

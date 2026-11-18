@@ -55,9 +55,21 @@ export interface ApiDocsConfig {
   enabled: boolean
 }
 
+export type ChannelRoutingStrategy = 'priority' | 'weighted' | 'round-robin'
+
+export interface ChannelRoutingConfig {
+  strategy: ChannelRoutingStrategy
+  maxRetries: number
+  maxFallbacks: number
+  retryBackoffMs: number
+  cooldownMs: number
+  retryStatusCodes: number[]
+}
+
 export interface SystemConfig extends BillingConfig {
   adminSecurity: AdminSecurityConfig
   apiDocs: ApiDocsConfig
+  routing: ChannelRoutingConfig
 }
 
 export interface AdminLoginResponse {

@@ -139,9 +139,21 @@ type ApiDocsConfig = {
     enabled: boolean;
 }
 
+type ChannelRoutingStrategy = "priority" | "weighted" | "round-robin";
+
+type ChannelRoutingConfig = {
+    strategy: ChannelRoutingStrategy;
+    maxRetries: number;
+    maxFallbacks: number;
+    retryBackoffMs: number;
+    cooldownMs: number;
+    retryStatusCodes: number[];
+}
+
 type SystemConfig = BillingConfig & {
     adminSecurity: AdminSecurityConfig;
     apiDocs: ApiDocsConfig;
+    routing: ChannelRoutingConfig;
 }
 
 type ApiTokenData = {

@@ -1,10 +1,12 @@
 import { Context } from "hono"
 import { getApiKeyForRoute, fetchTokenData, fetchChannelsForToken } from "./auth"
 import { RouteId, isChannelAllowedForRoute } from "./route-policy"
-import { findChannelModelMapping, getJsonSetting } from "../../utils"
+import { findModelMapping, getJsonSetting } from "../../utils"
 import { CONSTANTS } from "../../constants"
 import { TokenUtils } from "../../admin/token_utils"
-import { normalizeChannelConfig } from "../../channel-config"
+import type { NormalizedChannelConfig } from "../../channel-config"
+import { getSystemConfig } from "../../system-config"
+import { selectChannel } from "./channel-selection"
 import {
     buildUsageRequestMetadata,
     hashTokenKey,
@@ -14,7 +16,7 @@ import {
 
 export type ResolvedChannelCandidate = {
     key: string
-    config: ChannelConfig
+    config: NormalizedChannelConfig
     mapping: ChannelModelMapping
 }
 
@@ -26,19 +28,7 @@ export type ChannelResolution = {
     logFailure: (errorCode: string, errorSummary?: string) => void
     trackingState: RequestTrackingState
     setActiveChannel: (channel: ResolvedChannelCandidate) => void
-}
-
-export const pickHighestPriorityChannel = (
-    channels: ResolvedChannelCandidate[]
-): ResolvedChannelCandidate => {
-    const maxWeight = channels.reduce((highest, current) => {
-        return Math.max(highest, current.config.weight ?? 0);
-    }, 0);
-    const highestPriorityChannels = channels.filter((channel) => {
-        return (channel.config.weight ?? 0) === maxWeight;
-    });
-    const randomIndex = Math.floor(Math.random() * highestPriorityChannels.length);
-    return highestPriorityChannels[randomIndex];
+    routing: ChannelRoutingConfig
 }
 
 /**
@@ -88,23 +78,13 @@ export const resolveChannel = async (
     let hasDisabledMatchingChannel = false;
 
     for (const row of channelsResult.results) {
-        const config = (() => {
-            try {
-                return normalizeChannelConfig(JSON.parse(row.value) as ChannelConfig);
-            } catch {
-                return null;
-            }
-        })();
-        if (!config) {
-            console.error(`Invalid channel config for key: ${row.key}`);
-            continue;
-        }
+        const config = row.config;
 
         if (!isChannelAllowedForRoute(routeId, config)) {
             continue;
         }
 
-        const mapping = findChannelModelMapping(config, requestedModel);
+        const mapping = findModelMapping(config.models, requestedModel);
         if (!mapping) {
             continue;
         }
@@ -162,7 +142,8 @@ export const resolveChannel = async (
         }
     }
 
-    const selectedChannel = pickHighestPriorityChannel(availableChannels);
+    const routing = (await getSystemConfig(c)).routing;
+    const selectedChannel = selectChannel(availableChannels, routing.strategy);
     const trackingState: RequestTrackingState = {
         retryCount: 0,
     };
@@ -248,5 +229,6 @@ export const resolveChannel = async (
         logFailure,
         trackingState,
         setActiveChannel,
+        routing,
     };
 }

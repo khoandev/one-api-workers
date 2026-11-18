@@ -63,7 +63,7 @@ class UnifiedProxyEndpoint extends OpenAPIRoute {
             return geminiTarget ? wrapGeminiErrorResponse(result) : result
         }
 
-        const { channels, initialChannel, requestBody, saveUsage, logFailure, trackingState, setActiveChannel } = result
+        const { channels, initialChannel, requestBody, saveUsage, logFailure, trackingState, setActiveChannel, routing } = result
 
         return executeWithFallbackChannels(
             c,
@@ -75,6 +75,7 @@ class UnifiedProxyEndpoint extends OpenAPIRoute {
             trackingState,
             setActiveChannel,
             routeId,
+            routing,
         )
     }
 }
