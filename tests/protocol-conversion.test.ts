@@ -1182,3 +1182,313 @@ test("dispatch picks conversion only when the upstream protocol differs", () => 
 
     expect(getProvider("chat-completions", "unknown")).toBeUndefined();
 });
+
+test("chat tool calls convert to anthropic tool use", async () => {
+    let upstreamRequest: Request | undefined;
+    const parameters = {
+        type: "object",
+        properties: { city: { type: "string" } },
+        required: ["city"],
+    };
+    mockUpstream((request) => {
+        upstreamRequest = request;
+        return jsonResponse({
+            id: "msg_upstream",
+            type: "message",
+            role: "assistant",
+            model: "claude-3-opus",
+            content: [{
+                type: "tool_use",
+                id: "toolu_1",
+                name: "get_weather",
+                input: { city: "Paris" },
+            }],
+            stop_reason: "tool_use",
+            stop_sequence: null,
+            usage: { input_tokens: 3, output_tokens: 2 },
+        });
+    });
+
+    const { response, saved } = await runProvider("chat-completions", "claude", {
+        endpoint: "https://api.anthropic.com",
+        api_key: "k",
+    }, {
+        model: "claude-3-opus",
+        messages: [{ role: "user", content: "weather?" }],
+        tools: [{
+            type: "function",
+            function: {
+                name: "get_weather",
+                description: "Get weather",
+                parameters,
+            },
+        }],
+        tool_choice: "auto",
+    });
+
+    const upstreamBody = JSON.parse(await upstreamRequest!.text());
+    expect(upstreamBody.tools).toEqual([{
+        name: "get_weather",
+        description: "Get weather",
+        input_schema: parameters,
+    }]);
+
+    const body = await response.json() as Record<string, any>;
+    expect(body.choices[0].finish_reason).toBe("tool_calls");
+    expect(body.choices[0].message.tool_calls[0]).toEqual({
+        id: "toolu_1",
+        type: "function",
+        function: {
+            name: "get_weather",
+            arguments: '{"city":"Paris"}',
+        },
+    });
+    expect(saved).toEqual([{ prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 }]);
+});
+
+test("anthropic tool use and tool results convert to openai chat messages", async () => {
+    let upstreamRequest: Request | undefined;
+    const parameters = {
+        type: "object",
+        properties: { city: { type: "string" } },
+        required: ["city"],
+    };
+    mockUpstream((request) => {
+        upstreamRequest = request;
+        return jsonResponse({
+            id: "chatcmpl-tools",
+            object: "chat.completion",
+            created: 1,
+            model: "gpt-4o",
+            choices: [{
+                index: 0,
+                message: {
+                    role: "assistant",
+                    content: null,
+                    tool_calls: [{
+                        id: "call_1",
+                        type: "function",
+                        function: {
+                            name: "get_weather",
+                            arguments: '{"city":"Paris"}',
+                        },
+                    }],
+                },
+                finish_reason: "tool_calls",
+            }],
+            usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+        });
+    });
+
+    const { response } = await runProvider("messages", "openai", {
+        endpoint: "https://upstream.example",
+        api_key: "k",
+    }, {
+        model: "gpt-4o",
+        max_tokens: 64,
+        tools: [{
+            name: "get_weather",
+            description: "Get weather",
+            input_schema: parameters,
+        }],
+        messages: [
+            { role: "user", content: "weather?" },
+            {
+                role: "assistant",
+                content: [{
+                    type: "tool_use",
+                    id: "toolu_1",
+                    name: "get_weather",
+                    input: { city: "Paris" },
+                }],
+            },
+            {
+                role: "user",
+                content: [{
+                    type: "tool_result",
+                    tool_use_id: "toolu_1",
+                    content: "sunny",
+                }],
+            },
+        ],
+    });
+
+    const upstreamBody = JSON.parse(await upstreamRequest!.text());
+    expect(upstreamBody.tools[0]).toMatchObject({
+        type: "function",
+        function: { name: "get_weather", parameters },
+    });
+    expect(upstreamBody.messages).toContainEqual(expect.objectContaining({
+        role: "assistant",
+        tool_calls: [expect.objectContaining({
+            id: "toolu_1",
+            function: expect.objectContaining({ name: "get_weather" }),
+        })],
+    }));
+    expect(upstreamBody.messages).toContainEqual(expect.objectContaining({
+        role: "tool",
+        tool_call_id: "toolu_1",
+        content: "sunny",
+    }));
+
+    const body = await response.json() as Record<string, any>;
+    expect(body.stop_reason).toBe("tool_use");
+    expect(body.content[0]).toEqual({
+        type: "tool_use",
+        id: "call_1",
+        name: "get_weather",
+        input: { city: "Paris" },
+    });
+});
+
+test("responses function calls convert to openai chat tool messages", async () => {
+    let upstreamRequest: Request | undefined;
+    const parameters = {
+        type: "object",
+        properties: { city: { type: "string" } },
+        required: ["city"],
+    };
+    mockUpstream((request) => {
+        upstreamRequest = request;
+        return jsonResponse({
+            id: "chatcmpl-responses-tools",
+            object: "chat.completion",
+            created: 1,
+            model: "gpt-4o",
+            choices: [{
+                index: 0,
+                message: {
+                    role: "assistant",
+                    content: null,
+                    tool_calls: [{
+                        id: "call_1",
+                        type: "function",
+                        function: {
+                            name: "get_weather",
+                            arguments: '{"city":"Paris"}',
+                        },
+                    }],
+                },
+                finish_reason: "tool_calls",
+            }],
+        });
+    });
+
+    const { response } = await runProvider("responses", "openai", {
+        endpoint: "https://upstream.example",
+        api_key: "k",
+    }, {
+        model: "gpt-4o",
+        input: [
+            { type: "message", role: "user", content: "weather?" },
+            {
+                type: "function_call",
+                call_id: "call_1",
+                name: "get_weather",
+                arguments: '{"city":"Paris"}',
+            },
+            {
+                type: "function_call_output",
+                call_id: "call_1",
+                output: "sunny",
+            },
+        ],
+        tools: [{
+            type: "function",
+            name: "get_weather",
+            description: "Get weather",
+            parameters,
+        }],
+    });
+
+    const upstreamBody = JSON.parse(await upstreamRequest!.text());
+    expect(upstreamBody.messages).toContainEqual(expect.objectContaining({
+        role: "assistant",
+        tool_calls: [expect.objectContaining({
+            id: "call_1",
+            function: expect.objectContaining({ name: "get_weather" }),
+        })],
+    }));
+    expect(upstreamBody.messages).toContainEqual(expect.objectContaining({
+        role: "tool",
+        tool_call_id: "call_1",
+        content: "sunny",
+    }));
+
+    const body = await response.json() as Record<string, any>;
+    expect(body.output).toContainEqual(expect.objectContaining({
+        type: "function_call",
+        name: "get_weather",
+        arguments: '{"city":"Paris"}',
+        call_id: "call_1",
+    }));
+});
+
+test("chat stream tool call deltas are reassembled into tool_calls chunks", async () => {
+    const upstreamStream = [
+        `event: message_start\ndata: ${JSON.stringify({
+            message: {
+                id: "msg_upstream",
+                type: "message",
+                role: "assistant",
+                model: "claude-3-opus",
+                content: [],
+                stop_reason: null,
+                stop_sequence: null,
+                usage: { input_tokens: 3, output_tokens: 1 },
+            },
+        })}\n\n`,
+        `event: content_block_start\ndata: ${JSON.stringify({
+            index: 0,
+            content_block: {
+                type: "tool_use",
+                id: "toolu_1",
+                name: "get_weather",
+                input: {},
+            },
+        })}\n\n`,
+        `event: content_block_delta\ndata: ${JSON.stringify({
+            index: 0,
+            delta: { type: "input_json_delta", partial_json: '{"city":' },
+        })}\n\n`,
+        `event: content_block_delta\ndata: ${JSON.stringify({
+            index: 0,
+            delta: { type: "input_json_delta", partial_json: '"Paris"}' },
+        })}\n\n`,
+        `event: message_delta\ndata: ${JSON.stringify({
+            delta: { stop_reason: "tool_use", stop_sequence: null },
+            usage: { input_tokens: 3, output_tokens: 2 },
+        })}\n\n`,
+        "event: message_stop\ndata: {}\n\n",
+    ].join("");
+    mockUpstream(() => sseResponse(upstreamStream));
+
+    const { response, saved } = await runProvider("chat-completions", "claude", {
+        endpoint: "https://api.anthropic.com",
+        api_key: "k",
+    }, {
+        model: "claude-3-opus",
+        stream: true,
+        messages: [{ role: "user", content: "weather?" }],
+    });
+
+    const text = await response.text();
+    const chunks = text
+        .split("\n\n")
+        .filter((line) => line.startsWith("data: "))
+        .map((line) => line.slice("data: ".length))
+        .filter((payload) => payload !== "[DONE]")
+        .map((payload) => JSON.parse(payload) as Record<string, any>);
+    const toolDeltas = chunks.flatMap((chunk) => chunk.choices?.[0]?.delta?.tool_calls ?? []);
+
+    expect(toolDeltas[0]).toMatchObject({
+        index: 0,
+        id: "toolu_1",
+        type: "function",
+        function: { name: "get_weather" },
+    });
+    expect(toolDeltas.map((delta: any) => delta.function?.arguments ?? "").join(""))
+        .toBe('{"city":"Paris"}');
+    expect(chunks.at(-1)?.choices?.[0]?.finish_reason).toBe("tool_calls");
+    expect(saved).toEqual([{ prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 }]);
+});
