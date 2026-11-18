@@ -9,6 +9,7 @@ import {
     collectPricingSyncTargets,
     mergePricingSuggestions,
     normalizePricingModelKey,
+    runScheduledPricingSync,
     type PricingSyncTarget,
 } from "../src/pricing-sync";
 
@@ -212,6 +213,63 @@ test("POST /api/admin/pricing/sync previews suggestions without writing pricing"
             .bind("MODEL_PRICING_CONFIG")
             .first<string>("value");
         expect(stored).toBeNull();
+    } finally {
+        globalThis.fetch = originalFetch;
+        fixture.close();
+    }
+});
+
+test("scheduled sync fills only models without pricing and leaves stored prices untouched", async () => {
+    const fixture = createTestDatabase();
+    const originalFetch = globalThis.fetch;
+
+    const readStoredPricing = async () => {
+        const value = await fixture.database
+            .prepare(`SELECT value FROM settings WHERE key = ?`)
+            .bind("MODEL_PRICING_CONFIG")
+            .first<string>("value");
+        return value ? JSON.parse(value) as Record<string, unknown> : null;
+    };
+
+    try {
+        await db.migrate(fixture.context);
+        await fixture.database.prepare(
+            `INSERT INTO channel_config (key, value) VALUES (?, ?)`,
+        ).bind("openai-test", JSON.stringify({
+            name: "OpenAI",
+            type: "openai",
+            endpoint: "https://api.openai.com/v1",
+            api_keys: ["sk-test"],
+            models: [
+                { id: "gpt-4o", name: "gpt-4o" },
+                { id: "gpt-4o-mini", name: "gpt-4o-mini" },
+            ],
+        })).run();
+
+        // gpt-4o already has an admin-set price that must survive the scheduled sync.
+        await fixture.database.prepare(
+            `INSERT INTO settings (key, value) VALUES (?, ?)`,
+        ).bind("MODEL_PRICING_CONFIG", JSON.stringify({
+            "gpt-4o": { billingMode: "volume", input: 9, output: 9 },
+        })).run();
+
+        globalThis.fetch = (async () => Response.json(modelsDevPayload)) as typeof fetch;
+
+        const summary = await runScheduledPricingSync(fixture.context);
+        expect(summary).toEqual({
+            targetCount: 2,
+            matched: 2,
+            updated: 1,
+            skipped: 1,
+            unmatched: 0,
+        });
+
+        const stored = await readStoredPricing();
+        expect(stored?.["gpt-4o"]).toEqual({ billingMode: "volume", input: 9, output: 9 });
+        expect(stored?.["gpt-4o-mini"]).toEqual({ billingMode: "volume", input: 0.15, output: 0.6 });
+
+        // Second run is a no-op: everything already priced.
+        expect((await runScheduledPricingSync(fixture.context)).updated).toBe(0);
     } finally {
         globalThis.fetch = originalFetch;
         fixture.close();
