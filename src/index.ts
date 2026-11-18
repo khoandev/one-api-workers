@@ -35,8 +35,10 @@ type AppContext = Context<HonoCustomType>
 function isApiRequest(pathname: string): boolean {
     return pathname === '/api'
         || pathname === '/v1'
+        || pathname === '/v1beta'
         || pathname.startsWith('/api/')
         || pathname.startsWith('/v1/')
+        || pathname.startsWith('/v1beta/')
 }
 
 function isFrontendAssetRequest(pathname: string): boolean {
@@ -100,6 +102,7 @@ const openapi = fromHono(app, {
 
 // CORS：公共 API（/v1/*）无凭据可默认放开；管理端仅放行显式配置的来源
 openapi.use('/v1/*', cors());
+openapi.use('/v1beta/*', cors());
 
 openapi.use('/api/admin/*', async (c, next) => {
     const adminCorsOrigins = (c.env.ADMIN_CORS_ORIGINS || "")

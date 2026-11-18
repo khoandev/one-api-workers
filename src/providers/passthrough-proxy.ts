@@ -55,6 +55,11 @@ const buildAuthHeaders = (
         return { [descriptor.auth.headerName]: apiKey }
     }
 
+    // Audio channels have no protocol descriptor, but Azure audio still expects `api-key`.
+    if (config.type === "azure-openai-audio") {
+        return { "api-key": apiKey }
+    }
+
     return { Authorization: `Bearer ${apiKey}` }
 }
 

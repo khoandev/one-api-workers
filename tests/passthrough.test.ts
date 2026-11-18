@@ -233,6 +233,25 @@ test("audio passthrough forwards to the speech endpoint and estimates usage", as
     )
 })
 
+test("azure audio passthrough authenticates with api-key", async () => {
+    const upstream = install(() => new Response("ID3-audio", {
+        headers: { "content-type": "audio/mpeg" },
+    }))
+
+    const { response } = await runProvider({
+        routeId: "audio-speech",
+        type: "azure-openai-audio",
+        config: { endpoint: "https://resource.openai.azure.com/", api_key: "azure-audio-key" },
+        requestBody: { model: "tts-1", input: "hello world", voice: "alloy" },
+    })
+
+    const call = upstream.last()
+    expect(call.url.toString()).toBe("https://resource.openai.azure.com/openai/v1/audio/speech")
+    expect(call.request.headers.get("api-key")).toBe("azure-audio-key")
+    expect(call.request.headers.get("authorization")).toBeNull()
+    expect(await response.text()).toBe("ID3-audio")
+})
+
 test("openai chat stream forwards raw bytes and saves upstream usage", async () => {
     const text = `data: ${JSON.stringify({ choices: [{ delta: { content: "he" } }] })}\n\n`
         + `data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 4, completion_tokens: 2, total_tokens: 6 } })}\n\n`

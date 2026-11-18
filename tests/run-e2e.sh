@@ -356,6 +356,16 @@ assert_http "?key= is gemini-only → 401" "401" "Authorization header" "$R"
 R=$(do_post -H "x-goog-api-key: sk-mock-all" "$API/v1beta/models/gpt-4o:predict" -H "Content-Type: application/json" -d "$GEMINI_CONTENTS")
 assert_http "gemini unsupported action → 404" "404" '"error"' "$R"
 
+R=$(curl -s -D- -o /dev/null -X OPTIONS "$API/v1beta/models/gemini-native-model:generateContent" \
+  -H "Origin: https://client.example" \
+  -H "Access-Control-Request-Method: POST" \
+  -H "Access-Control-Request-Headers: x-goog-api-key,content-type")
+assert "gemini route CORS preflight allows origin" "access-control-allow-origin: \*" "$R"
+assert "gemini route CORS preflight allows headers" "x-goog-api-key" "$R"
+
+R=$(do_get "$API/v1beta/models")
+assert "gemini unknown GET is JSON API 404, not SPA HTML" "404" "$R"
+
 R=$(do_post -H "x-goog-api-key: sk-mock-all" "$API/v1beta/models/does-not-exist:generateContent" -H "Content-Type: application/json" -d "$GEMINI_CONTENTS")
 assert_http "gemini unmapped model → 400" "400" '"status":"INVALID_ARGUMENT"' "$R"
 
@@ -380,6 +390,14 @@ R=$(curl -s -o /dev/null -w "%{http_code} %{content_type}" -X POST "$API/v1/audi
 assert "audio speech → 200 audio/mpeg" "200 audio/mpeg" "$R"
 R=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API/v1/audio/speech" -H "Content-Type: application/json" -d '{"model":"tts-1","input":"hello world","voice":"alloy"}')
 assert "audio speech without auth → 401" "401" "$R"
+
+reset_mock_inspection
+R=$(curl -s -o /dev/null -w "%{http_code} %{content_type}" -X POST "$API/v1/audio/speech" -H "Authorization: Bearer sk-mock-all" -H "Content-Type: application/json" -d '{"model":"azure-tts","input":"hello world","voice":"alloy"}')
+assert "azure audio speech → 200 audio/mpeg" "200 audio/mpeg" "$R"
+INSPECT=$(get_mock_inspection "audio-speech")
+assert "azure audio upstream uses api-key" "\"api-key\":\"mock-key\"" "$INSPECT"
+assert_not_contains "azure audio upstream has no Bearer auth" "\"authorization\":" "$INSPECT"
+assert "azure audio upstream uses the openai/v1 path" "\"path\":\"/openai/v1/audio/speech\"" "$INSPECT"
 
 # ---- Quota ----
 echo ""

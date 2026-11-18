@@ -41,8 +41,11 @@ curl -s "$API_URL/api/admin/channel" > /dev/null 2>&1 || true
 # Channel: openai-audio type
 "${DB_EXEC[@]}" "INSERT OR REPLACE INTO channel_config (key, value) VALUES ('test-audio', '{\"name\":\"test-audio\",\"type\":\"openai-audio\",\"endpoint\":\"$MOCK\",\"api_key\":\"mock-key\",\"deployment_mapper\":{\"tts-1\":\"tts-1\"}}')"
 
+# Channel: azure-openai-audio type
+"${DB_EXEC[@]}" "INSERT OR REPLACE INTO channel_config (key, value) VALUES ('test-azure-audio', '{\"name\":\"test-azure-audio\",\"type\":\"azure-openai-audio\",\"endpoint\":\"$MOCK/\",\"api_key\":\"mock-key\",\"deployment_mapper\":{\"azure-tts\":\"tts-1\"}}')"
+
 # Token: access to all test channels only
-"${DB_EXEC[@]}" "INSERT OR REPLACE INTO api_token (key, value, usage) VALUES ('sk-mock-all', '{\"name\":\"mock-all\",\"channel_keys\":[\"test-openai\",\"test-azure\",\"test-claude\",\"test-c2o\",\"test-responses\",\"test-azure-resp\",\"test-gemini-native\",\"test-exact\",\"test-audio\"],\"total_quota\":99999999}', 0)"
+"${DB_EXEC[@]}" "INSERT OR REPLACE INTO api_token (key, value, usage) VALUES ('sk-mock-all', '{\"name\":\"mock-all\",\"channel_keys\":[\"test-openai\",\"test-azure\",\"test-claude\",\"test-c2o\",\"test-responses\",\"test-azure-resp\",\"test-gemini-native\",\"test-exact\",\"test-audio\",\"test-azure-audio\"],\"total_quota\":99999999}', 0)"
 
 # Token: limited to openai only
 "${DB_EXEC[@]}" "INSERT OR REPLACE INTO api_token (key, value, usage) VALUES ('sk-mock-openai', '{\"name\":\"mock-openai\",\"channel_keys\":[\"test-openai\"],\"total_quota\":99999999}', 0)"
