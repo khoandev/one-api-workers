@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { getJsonSetting, saveSetting } from "../src/utils";
+import { attachKv, createFakeKv } from "./helpers/fake-kv";
 import { createTestDatabase } from "./helpers/sqlite-d1";
 
 const seedSettings = () => {
@@ -30,6 +31,31 @@ test("repeated JSON setting reads hit settings once", async () => {
         expect(settingSelects()).toBe(1);
     } finally {
         fixture.close();
+    }
+});
+
+test("a second isolate reads the setting from KV until it saves", async () => {
+    const kv = createFakeKv();
+    const first = seedSettings();
+    const second = seedSettings();
+    attachKv(first.fixture, kv);
+    attachKv(second.fixture, kv);
+
+    try {
+        await saveSetting(first.fixture.context, "fixture", JSON.stringify({ value: 1 }));
+        // saveSetting deletes the KV entry, so the writer isolate has to warm it.
+        expect(await getJsonSetting(first.fixture.context, "fixture")).toEqual({ value: 1 });
+
+        expect(await getJsonSetting(second.fixture.context, "fixture")).toEqual({ value: 1 });
+        expect(second.settingSelects()).toBe(0);
+
+        await saveSetting(second.fixture.context, "fixture", JSON.stringify({ value: 2 }));
+        expect(kv.store.has("oaw:cache:v1:setting:json:fixture")).toBe(false);
+        expect(await getJsonSetting(second.fixture.context, "fixture")).toEqual({ value: 2 });
+        expect(second.settingSelects()).toBe(1);
+    } finally {
+        first.fixture.close();
+        second.fixture.close();
     }
 });
 

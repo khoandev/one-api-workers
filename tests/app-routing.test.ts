@@ -3,6 +3,7 @@ import { Database } from "bun:sqlite"
 
 import db from "../src/db"
 import app from "../src/index"
+import { createFakeKv } from "./helpers/fake-kv"
 
 type Row = Record<string, any>
 
@@ -175,6 +176,38 @@ test("unknown gemini GET returns an API 404 instead of the SPA entry", async () 
 
     expect(response.status).toBe(404)
     expect(response.headers.get("content-type") ?? "").not.toContain("text/html")
+})
+
+// Stands in for the manual `/v1/models` smoke check: workerd cannot start on this host.
+test("/v1/models fills KV and a cold isolate serves the catalog from it", async () => {
+    const kv = createFakeKv()
+    // A fresh DB wrapper is a fresh isolate scope, so L1 starts cold each call.
+    const kvEnv = () => ({ ...env, DB: { ...d1 }, KV: kv.namespace })
+    const listModels = (scopeEnv: unknown) => app.fetch(
+        new Request("http://localhost/v1/models", {
+            headers: { authorization: "Bearer sk-app-test" },
+        }),
+        scopeEnv as any,
+        createContext() as any,
+    )
+
+    const first = await listModels(kvEnv())
+    expect(first.status).toBe(200)
+    const firstBody = await first.json() as Row
+    expect(firstBody.data.map((model: Row) => model.id)).toContain("gemini-test")
+    await Promise.all(pending.splice(0))
+
+    const cached = kv.store.get("oaw:cache:v1:channel_config:all")
+    expect(cached).toBeString()
+    expect(JSON.parse(cached as string)).toMatchObject({
+        value: { results: [{ key: "test-gemini" }] },
+    })
+
+    d1.sqlite.run("DELETE FROM channel_config")
+    const second = await listModels(kvEnv())
+    expect(second.status).toBe(200)
+    const secondBody = await second.json() as Row
+    expect(secondBody.data.map((model: Row) => model.id)).toContain("gemini-test")
 })
 
 test("gemini route returns the gemini error envelope on auth failure", async () => {

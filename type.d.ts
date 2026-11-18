@@ -16,6 +16,8 @@ interface AnalyticsEngineDataset {
 type CloudflareBindings = {
     DB: D1Database;
     ASSETS: Fetcher;
+    // Optional: without the binding the cache degrades to isolate memory + D1.
+    KV?: KVNamespace;
     ADMIN_TOKEN: string;
     CF_API_TOKEN?: string;
     CF_ACCOUNT_ID?: string;

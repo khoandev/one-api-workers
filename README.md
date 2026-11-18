@@ -108,7 +108,7 @@ one-api-workers/
 ### Requirements
 
 - Bun 1.3+
-- Cloudflare account with Workers + D1 + Analytics Engine (`usage_events_by_token`)
+- Cloudflare account with Workers + D1 + KV + Analytics Engine (`usage_events_by_token`)
 
 ### Install dependencies
 
@@ -121,6 +121,7 @@ bun install
 `wrangler.jsonc` / `wrangler.local.jsonc` already include the required binding shape; replace them with your own values:
 
 - `d1_databases[].database_name` / `database_id`: your D1 database
+- `kv_namespaces[].id`: a KV namespace holding the shared cache (channel catalog, settings, analytics). Optional: without the binding the Worker caches in isolate memory + D1 only
 - `analytics_engine_datasets[].dataset`: defaults to `usage_events_by_token`
 - `vars.FRONTEND_DEV_SERVER_URL`: local integrated dev only; default `http://127.0.0.1:5173`
 - `assets`: keep the `public/` → `ASSETS` binding

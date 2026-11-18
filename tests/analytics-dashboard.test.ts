@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { Context } from "hono";
 import { AnalyticsDashboardEndpoint } from "../src/admin/analytics_api";
+import { attachKv, createFakeKv } from "./helpers/fake-kv";
 import { createTestDatabase } from "./helpers/sqlite-d1";
 
 const buildFixture = () => {
@@ -25,8 +26,26 @@ const buildFixture = () => {
     return { fixture, context };
 };
 
-test("dashboard bundle probes the dataset once per cache window", async () => {
-    const { fixture, context } = buildFixture();
+const expectDashboardPayload = (data: Record<string, unknown>) => {
+    expect(Object.keys(data).sort()).toEqual(
+        ["breakdowns", "displayDecimals", "overview", "range", "trend"]
+    );
+    expect(data.range).toBe("24h");
+    expect(data.displayDecimals).toBe(4);
+    expect(Object.keys(data.breakdowns as Record<string, unknown>).sort()).toEqual(
+        ["channel", "model", "provider", "token"]
+    );
+    expect(Object.keys(data.overview as Record<string, unknown>).sort()).toEqual(["range", "totals"]);
+    expect(Object.keys(data.trend as Record<string, unknown>).sort()).toEqual(["bucket", "points", "range"]);
+};
+
+test("dashboard bundle is served from cache after the first probe", async () => {
+    const kv = createFakeKv();
+    const first = buildFixture();
+    const second = buildFixture();
+    attachKv(first.fixture, kv);
+    attachKv(second.fixture, kv);
+
     const originalFetch = globalThis.fetch;
     let fetchCount = 0;
 
@@ -45,26 +64,32 @@ test("dashboard bundle probes the dataset once per cache window", async () => {
     }) as typeof fetch;
 
     try {
-        const first = await new AnalyticsDashboardEndpoint().handle(context) as {
+        const firstResult = await new AnalyticsDashboardEndpoint().handle(first.context) as {
             success: boolean;
             data: Record<string, unknown>;
         };
         expect(fetchCount).toBe(7);
-        expect(first.success).toBe(true);
-        expect(Object.keys(first.data).sort()).toEqual(
-            ["breakdowns", "displayDecimals", "overview", "range", "trend"]
-        );
-        expect(first.data.range).toBe("24h");
-        expect(first.data.displayDecimals).toBe(4);
-        expect(Object.keys(first.data.breakdowns as Record<string, unknown>).sort()).toEqual(
-            ["channel", "model", "provider", "token"]
-        );
+        expect(firstResult.success).toBe(true);
+        expectDashboardPayload(firstResult.data);
 
-        const second = await new AnalyticsDashboardEndpoint().handle(context);
-        expect(fetchCount).toBe(13);
-        expect(second).toMatchObject({ success: true });
+        const secondResult = await new AnalyticsDashboardEndpoint().handle(first.context) as {
+            success: boolean;
+            data: Record<string, unknown>;
+        };
+        expect(fetchCount).toBe(7);
+        expectDashboardPayload(secondResult.data);
+
+        expect(kv.store.has("oaw:cache:v1:analytics:dashboard:24h")).toBe(true);
+
+        const otherIsolate = await new AnalyticsDashboardEndpoint().handle(second.context) as {
+            success: boolean;
+            data: Record<string, unknown>;
+        };
+        expect(fetchCount).toBe(7);
+        expectDashboardPayload(otherIsolate.data);
     } finally {
         globalThis.fetch = originalFetch;
-        fixture.close();
+        first.fixture.close();
+        second.fixture.close();
     }
 });

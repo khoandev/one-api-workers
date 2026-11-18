@@ -272,7 +272,7 @@ export class ChannelUpsertEndpoint extends OpenAPIRoute {
             return c.text('Failed to upsert channel config', 500);
         }
 
-        invalidateChannelCache(c);
+        await invalidateChannelCache(c);
 
         return {
             success: true,
@@ -362,7 +362,7 @@ export class ChannelDeleteEndpoint extends OpenAPIRoute {
             `DELETE FROM channel_config WHERE key = ?`
         ).bind(key).run();
 
-        invalidateChannelCache(c);
+        await invalidateChannelCache(c);
 
         return {
             success: true,

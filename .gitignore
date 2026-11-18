@@ -30,7 +30,7 @@ lerna-debug.log*
 
 # misc
 .DS_Store
-public*/
+/public/
 bun.lock
 *.local.jsonc
 .zcode

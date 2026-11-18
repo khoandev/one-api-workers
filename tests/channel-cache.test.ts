@@ -1,5 +1,10 @@
 import { expect, test } from "bun:test";
-import { fetchChannelsForToken, invalidateChannelCache } from "../src/providers/shared/auth";
+import {
+    fetchChannelCatalog,
+    filterChannelsForToken,
+    invalidateChannelCache,
+} from "../src/providers/shared/auth";
+import { attachKv, createFakeKv } from "./helpers/fake-kv";
 import { createTestDatabase } from "./helpers/sqlite-d1";
 
 const seedChannels = () => {
@@ -33,11 +38,11 @@ const token = (channel_keys: string[] = []) => ({
 const keysOf = (result: { results?: { key: string }[] }) =>
     (result.results ?? []).map((row) => row.key).sort();
 
-test("repeated token channel reads hit channel_config once", async () => {
+test("repeated catalog reads hit channel_config once", async () => {
     const { fixture, channelSelects } = seedChannels();
     try {
-        expect(keysOf(await fetchChannelsForToken(fixture.context, token()))).toEqual(["a", "b", "c"]);
-        expect(keysOf(await fetchChannelsForToken(fixture.context, token()))).toEqual(["a", "b", "c"]);
+        expect(keysOf(await fetchChannelCatalog(fixture.context))).toEqual(["a", "b", "c"]);
+        expect(keysOf(await fetchChannelCatalog(fixture.context))).toEqual(["a", "b", "c"]);
         expect(channelSelects()).toBe(1);
     } finally {
         fixture.close();
@@ -47,8 +52,8 @@ test("repeated token channel reads hit channel_config once", async () => {
 test("channel configs are normalized once in the cache loader", async () => {
     const { fixture } = seedChannels();
     try {
-        const first = await fetchChannelsForToken(fixture.context, token());
-        const second = await fetchChannelsForToken(fixture.context, token());
+        const first = await fetchChannelCatalog(fixture.context);
+        const second = await fetchChannelCatalog(fixture.context);
 
         expect(second).toBe(first);
 
@@ -64,13 +69,13 @@ test("channel configs are normalized once in the cache loader", async () => {
 test("raw channel writes stay invisible until the cache is invalidated", async () => {
     const { fixture } = seedChannels();
     try {
-        await fetchChannelsForToken(fixture.context, token());
+        await fetchChannelCatalog(fixture.context);
         fixture.sqlite.query("INSERT INTO channel_config (key, value) VALUES (?, ?)").run("d", '{"name":"d"}');
 
-        expect(keysOf(await fetchChannelsForToken(fixture.context, token()))).toEqual(["a", "b", "c"]);
+        expect(keysOf(await fetchChannelCatalog(fixture.context))).toEqual(["a", "b", "c"]);
 
-        invalidateChannelCache(fixture.context);
-        expect(keysOf(await fetchChannelsForToken(fixture.context, token()))).toEqual(["a", "b", "c", "d"]);
+        await invalidateChannelCache(fixture.context);
+        expect(keysOf(await fetchChannelCatalog(fixture.context))).toEqual(["a", "b", "c", "d"]);
     } finally {
         fixture.close();
     }
@@ -79,9 +84,35 @@ test("raw channel writes stay invisible until the cache is invalidated", async (
 test("token channel_keys filter the cached channel list", async () => {
     const { fixture } = seedChannels();
     try {
-        expect(keysOf(await fetchChannelsForToken(fixture.context, token(["a"])))).toEqual(["a"]);
-        expect(keysOf(await fetchChannelsForToken(fixture.context, token(["missing"])))).toEqual([]);
+        const catalog = await fetchChannelCatalog(fixture.context);
+
+        expect(keysOf(filterChannelsForToken(catalog, token(["a"])))).toEqual(["a"]);
+        expect(keysOf(filterChannelsForToken(catalog, token(["missing"])))).toEqual([]);
+        expect(keysOf(filterChannelsForToken(catalog, token()))).toEqual(["a", "b", "c"]);
     } finally {
         fixture.close();
+    }
+});
+
+test("a second isolate serves the catalog from KV until it is invalidated", async () => {
+    const kv = createFakeKv();
+    const first = seedChannels();
+    const second = seedChannels();
+    attachKv(first.fixture, kv);
+    attachKv(second.fixture, kv);
+
+    try {
+        expect(keysOf(await fetchChannelCatalog(first.fixture.context))).toEqual(["a", "b", "c"]);
+
+        second.fixture.sqlite.query("DELETE FROM channel_config WHERE key != ?").run("a");
+        expect(keysOf(await fetchChannelCatalog(second.fixture.context))).toEqual(["a", "b", "c"]);
+        expect(second.channelSelects()).toBe(0);
+
+        await invalidateChannelCache(second.fixture.context);
+        expect(keysOf(await fetchChannelCatalog(second.fixture.context))).toEqual(["a"]);
+        expect(second.channelSelects()).toBe(1);
+    } finally {
+        first.fixture.close();
+        second.fixture.close();
     }
 });

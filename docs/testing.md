@@ -37,7 +37,7 @@ Provider dispatch tests are split by behavior:
 The repo ships a mock-upstream based local end-to-end suite:
 
 - `tests/mock-upstream.ts`: local mock upstream
-- `tests/setup-test-data.sh`: writes test channels and tokens into local D1
+- `tests/setup-test-data.sh`: writes test channels and tokens into local D1 and purges the cached KV keys those rows shadow
 - `tests/run-e2e.sh`: verifies proxy paths, model list, auth failures, header scrubbing, and more
 
 ### Coverage

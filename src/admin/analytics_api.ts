@@ -2,11 +2,14 @@ import { Context } from "hono";
 import { OpenAPIRoute } from "chanfana";
 import { z } from "zod";
 
+import { CACHE_KEYS } from "../cache-keys";
+import { cachedKvValue } from "../kv-cache";
 import { CommonErrorResponse, CommonSuccessfulResponse } from "../model";
 import { getSystemConfig } from "../system-config";
 import {
     AnalyticsQueryUpstreamError,
     AnalyticsQueryValidationError,
+    normalizeAnalyticsRange,
     queryUsageOverview,
     queryUsageTrend,
     queryUsageBreakdown,
@@ -15,6 +18,7 @@ import {
 } from "../analytics/query";
 
 const rangeSchema = z.enum(["24h", "7d", "30d", "90d"]).optional();
+const DASHBOARD_CACHE_MAX_AGE_MS = 10_000;
 type AnalyticsErrorStatus = 400 | 401 | 403 | 404 | 429 | 500 | 502 | 504;
 
 const toAnalyticsErrorStatus = (error: unknown): AnalyticsErrorStatus => {
@@ -64,26 +68,35 @@ export class AnalyticsDashboardEndpoint extends OpenAPIRoute {
 
     async handle(c: Context<HonoCustomType>) {
         try {
-            const range = c.req.query("range");
-            const [overview, trend, token, channel, model, provider, systemConfig] = await Promise.all([
-                queryUsageOverview(c, range),
-                queryUsageTrend(c, range),
-                queryUsageBreakdown(c, range, "token"),
-                queryUsageBreakdown(c, range, "channel"),
-                queryUsageBreakdown(c, range, "model"),
-                queryUsageBreakdown(c, range, "provider"),
-                getSystemConfig(c),
-            ]);
+            const range = normalizeAnalyticsRange(c.req.query("range"));
+            const data = await cachedKvValue(
+                c,
+                CACHE_KEYS.analyticsDashboard(range),
+                DASHBOARD_CACHE_MAX_AGE_MS,
+                async () => {
+                    const [overview, trend, token, channel, model, provider, systemConfig] = await Promise.all([
+                        queryUsageOverview(c, range),
+                        queryUsageTrend(c, range),
+                        queryUsageBreakdown(c, range, "token"),
+                        queryUsageBreakdown(c, range, "channel"),
+                        queryUsageBreakdown(c, range, "model"),
+                        queryUsageBreakdown(c, range, "provider"),
+                        getSystemConfig(c),
+                    ]);
+
+                    return {
+                        range: overview.range,
+                        displayDecimals: systemConfig.displayDecimals,
+                        overview,
+                        trend,
+                        breakdowns: { token, channel, model, provider },
+                    };
+                },
+            );
 
             return {
                 success: true,
-                data: {
-                    range: overview.range,
-                    displayDecimals: systemConfig.displayDecimals,
-                    overview,
-                    trend,
-                    breakdowns: { token, channel, model, provider },
-                },
+                data,
             } as CommonResponse;
         } catch (error) {
             return toErrorResponse(c, error, "Failed to query analytics dashboard");

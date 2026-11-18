@@ -1,5 +1,10 @@
 import { Context } from "hono"
-import { getApiKeyForRoute, fetchTokenData, fetchChannelsForToken } from "./auth"
+import {
+    getApiKeyForRoute,
+    fetchTokenData,
+    fetchChannelCatalog,
+    filterChannelsForToken,
+} from "./auth"
 import { RouteId, isChannelAllowedForRoute } from "./route-policy"
 import { findModelMapping, getJsonSetting } from "../../utils"
 import { CONSTANTS } from "../../constants"
@@ -50,14 +55,21 @@ export const resolveChannel = async (
         return c.text("Authorization header or x-api-key not found", 401);
     }
 
-    const tokenInfo = await fetchTokenData(c, apiKey);
-    if (!tokenInfo) {
+    const [tokenResult, catalogResult, systemConfigResult] = await Promise.allSettled([
+        fetchTokenData(c, apiKey),
+        fetchChannelCatalog(c),
+        getSystemConfig(c),
+    ]);
+
+    if (tokenResult.status === "rejected") throw tokenResult.reason;
+    if (!tokenResult.value) {
         return c.text("Invalid API key", 401);
     }
+    if (catalogResult.status === "rejected") throw catalogResult.reason;
+    if (systemConfigResult.status === "rejected") throw systemConfigResult.reason;
 
-    const { tokenData, usage } = tokenInfo;
-
-    const channelsResult = await fetchChannelsForToken(c, tokenData);
+    const { tokenData, usage } = tokenResult.value;
+    const channelsResult = filterChannelsForToken(catalogResult.value, tokenData);
 
     if (!channelsResult.results || channelsResult.results.length === 0) {
         return c.text("No available channels for this token", 401);
@@ -142,7 +154,7 @@ export const resolveChannel = async (
         }
     }
 
-    const routing = (await getSystemConfig(c)).routing;
+    const routing = systemConfigResult.value.routing;
     const selectedChannel = selectChannel(availableChannels, routing.strategy);
     const trackingState: RequestTrackingState = {
         retryCount: 0,

@@ -1,7 +1,8 @@
 import { Context } from "hono";
 
 import { BILLING_RAW_SCALE, LEGACY_TO_RAW_FACTOR } from "../billing";
-import { cachedValue } from "../cache";
+import { CACHE_KEYS } from "../cache-keys";
+import { cachedKvValue } from "../kv-cache";
 import { DEFAULT_USAGE_ANALYTICS_DATASET_NAME } from "./usage-logger";
 import { t } from "../i18n";
 
@@ -48,7 +49,7 @@ type AnalyticsQueryRawResult<T extends Record<string, unknown>> = {
 }
 
 type DatasetColumnSupport = {
-    availableColumns: Set<string>;
+    availableColumns: string[];
 }
 
 type UsageLogQueryParams = {
@@ -221,7 +222,7 @@ const USAGE_LOG_NUMERIC_COLUMNS = [
     DOUBLE_FIELDS.cacheCost,
 ];
 
-const DATASET_COLUMN_SUPPORT_CACHE_TTL_MS = 5 * 60_000;
+const DATASET_COLUMN_SUPPORT_MAX_AGE_MS = 60 * 60_000;
 
 const sanitizeDatasetName = (value?: string): string => {
     if (value && /^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
@@ -272,6 +273,9 @@ const normalizeAnalyticsTimestamp = (value: unknown): string => {
 const escapeSqlString = (value: string): string => {
     return value.replace(/'/g, "''");
 };
+
+export const normalizeAnalyticsRange = (range?: string): AnalyticsRange =>
+    getRangeConfig(range).range;
 
 const getRangeConfig = (range?: string): { range: AnalyticsRange; config: RangeConfig } => {
     if (range && range in RANGE_CONFIG) {
@@ -508,10 +512,10 @@ const getDatasetColumnSupport = (
     c: Context<HonoCustomType>,
     dataset: string
 ): Promise<DatasetColumnSupport> => {
-    return cachedValue(
-        c.env.DB,
-        `analytics:columns:${dataset}`,
-        DATASET_COLUMN_SUPPORT_CACHE_TTL_MS,
+    return cachedKvValue(
+        c,
+        CACHE_KEYS.analyticsColumns(dataset),
+        DATASET_COLUMN_SUPPORT_MAX_AGE_MS,
         async () => {
             const availableColumns = new Set<string>();
 
@@ -532,13 +536,13 @@ LIMIT 1
                 Object.keys(row).forEach((columnName) => availableColumns.add(columnName));
             });
 
-            return { availableColumns };
+            return { availableColumns: [...availableColumns] };
         }
     );
 };
 
 const isColumnAvailable = (support: DatasetColumnSupport, columnName: string): boolean => {
-    return support.availableColumns.has(columnName);
+    return support.availableColumns.includes(columnName);
 };
 
 const buildBlobSelect = (

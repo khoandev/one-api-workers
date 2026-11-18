@@ -1,6 +1,8 @@
 import { Context } from "hono";
 import { legacyBillingAmountToRaw } from "../billing";
+import { CACHE_KEYS } from "../cache-keys";
 import { CONSTANTS } from "../constants";
+import { invalidateCachedKvValue } from "../kv-cache";
 import { getSetting, saveSetting } from "../utils";
 import { sanitizeChannelConfig } from "../channel-config";
 
@@ -318,6 +320,8 @@ const dbOperations = {
         }
 
         await saveSetting(c, CONSTANTS.DB_VERSION_KEY, CONSTANTS.DB_VERSION);
+        // The sanitize pass rewrote every channel row, so the cached catalog is stale.
+        await invalidateCachedKvValue(c, CACHE_KEYS.channelCatalog);
     },
     ensureReady: async (c: Context<HonoCustomType>) => {
         if (!dbReadyPromise) {

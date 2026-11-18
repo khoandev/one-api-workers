@@ -1,7 +1,12 @@
 import { Context } from "hono";
 import { OpenAPIRoute } from "chanfana";
 import { z } from "zod";
-import { getApiKeyFromHeaders, fetchTokenData, fetchChannelsForToken } from "./shared/auth";
+import {
+    getApiKeyFromHeaders,
+    fetchTokenData,
+    fetchChannelCatalog,
+    filterChannelsForToken,
+} from "./shared/auth";
 import { getJsonSetting } from "../utils";
 import { TokenUtils } from "../admin/token_utils";
 import { CONSTANTS } from "../constants";
@@ -42,12 +47,19 @@ export class ModelsEndpoint extends OpenAPIRoute {
             return c.json({ object: "list", data: [] });
         }
 
-        const tokenInfo = await fetchTokenData(c, apiKey);
-        if (!tokenInfo) {
+        const [tokenResult, catalogResult] = await Promise.allSettled([
+            fetchTokenData(c, apiKey),
+            fetchChannelCatalog(c),
+        ]);
+
+        if (tokenResult.status === "rejected") throw tokenResult.reason;
+        if (!tokenResult.value) {
             return c.text("Invalid API key", 401);
         }
+        if (catalogResult.status === "rejected") throw catalogResult.reason;
 
-        const channelsResult = await fetchChannelsForToken(c, tokenInfo.tokenData);
+        const tokenInfo = tokenResult.value;
+        const channelsResult = filterChannelsForToken(catalogResult.value, tokenInfo.tokenData);
 
         if (!channelsResult || !channelsResult.results || channelsResult.results.length === 0) {
             return c.json({

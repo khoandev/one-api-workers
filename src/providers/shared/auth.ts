@@ -1,12 +1,12 @@
 import { Context } from "hono"
 
-import { cachedValue, invalidateCached } from "../../cache"
+import { CACHE_KEYS } from "../../cache-keys"
 import { normalizeChannelConfig } from "../../channel-config"
 import type { NormalizedChannelConfig } from "../../channel-config"
+import { cachedKvValue, invalidateCachedKvValue } from "../../kv-cache"
 import type { RouteId } from "./route-policy"
 
-const CHANNEL_CACHE_KEY = "channel_config:all";
-const CHANNEL_CACHE_TTL_MS = 30_000;
+const CHANNEL_CACHE_MAX_AGE_MS = 5 * 60_000;
 
 export const getApiKeyFromHeaders = (c: Context<HonoCustomType>): string | null => {
     const authHeader = c.req.raw.headers.get('Authorization');
@@ -70,8 +70,8 @@ export const fetchTokenData = async (c: Context<HonoCustomType>, apiKey: string)
     };
 }
 
-export const invalidateChannelCache = (c: Context<HonoCustomType>): void => {
-    invalidateCached(c.env.DB, CHANNEL_CACHE_KEY);
+export const invalidateChannelCache = async (c: Context<HonoCustomType>): Promise<void> => {
+    await invalidateCachedKvValue(c, CACHE_KEYS.channelCatalog);
 }
 
 export type ChannelCatalogEntry = {
@@ -110,17 +110,24 @@ const loadAllChannels = async (
     return { results };
 }
 
-export const fetchChannelsForToken = async (
-    c: Context<HonoCustomType>,
-    tokenData: ApiTokenData
-): Promise<ChannelCatalog> => {
-    const catalog = await cachedValue(
-        c.env.DB,
-        CHANNEL_CACHE_KEY,
-        CHANNEL_CACHE_TTL_MS,
+/**
+ * The cached catalog is token-independent, so token permissions are applied
+ * after the cache read instead of inside it.
+ */
+export const fetchChannelCatalog = (
+    c: Context<HonoCustomType>
+): Promise<ChannelCatalog> =>
+    cachedKvValue(
+        c,
+        CACHE_KEYS.channelCatalog,
+        CHANNEL_CACHE_MAX_AGE_MS,
         () => loadAllChannels(c)
     );
 
+export const filterChannelsForToken = (
+    catalog: ChannelCatalog,
+    tokenData: ApiTokenData,
+): ChannelCatalog => {
     const channelKeys = tokenData.channel_keys;
     if (!channelKeys || channelKeys.length === 0) {
         return catalog;

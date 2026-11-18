@@ -1,8 +1,9 @@
 import { Context } from "hono";
-import { cachedValue, invalidateCached } from "./cache";
+import { CACHE_KEYS } from "./cache-keys";
 import { normalizeChannelConfig } from "./channel-config";
+import { cachedKvValue, invalidateCachedKvValue } from "./kv-cache";
 
-const SETTING_CACHE_TTL_MS = 30_000;
+const SETTING_CACHE_MAX_AGE_MS = 5 * 60_000;
 
 const getJsonObjectValue = <T = any>(
     value: string | any
@@ -28,10 +29,10 @@ const getJsonObjectValue = <T = any>(
 export const getJsonSetting = async <T = any>(
     c: Context<HonoCustomType>, key: string
 ): Promise<T | null> => {
-    const value = await cachedValue(
-        c.env.DB,
-        `setting:json:${key}`,
-        SETTING_CACHE_TTL_MS,
+    const value = await cachedKvValue(
+        c,
+        CACHE_KEYS.setting(key),
+        SETTING_CACHE_MAX_AGE_MS,
         () => getSetting(c, key)
     );
     if (!value) {
@@ -67,7 +68,7 @@ export const saveSetting = async (
         `INSERT INTO settings (key, value) VALUES (?, ?)`
         + ` ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = datetime('now')`
     ).bind(key, value, value).run();
-    invalidateCached(c.env.DB, `setting:json:${key}`);
+    await invalidateCachedKvValue(c, CACHE_KEYS.setting(key));
     return true;
 }
 

@@ -50,4 +50,19 @@ curl -s "$API_URL/api/admin/channel" > /dev/null 2>&1 || true
 # Token: quota almost full
 "${DB_EXEC[@]}" "INSERT OR REPLACE INTO api_token (key, value, usage) VALUES ('sk-mock-quota', '{\"name\":\"mock-quota\",\"channel_keys\":[\"test-openai\"],\"total_quota\":100}', 99)"
 
+# Seeding writes straight to D1, bypassing the admin APIs that invalidate KV.
+for key in \
+  "oaw:cache:v1:channel_config:all" \
+  "oaw:cache:v1:setting:json:SYSTEM_CONFIG" \
+  "oaw:cache:v1:setting:json:BILLING_CONFIG" \
+  "oaw:cache:v1:setting:json:MODEL_PRICING_CONFIG" \
+  "oaw:cache:v1:analytics:columns:usage_events_by_token" \
+  "oaw:cache:v1:analytics:dashboard:24h" \
+  "oaw:cache:v1:analytics:dashboard:7d" \
+  "oaw:cache:v1:analytics:dashboard:30d" \
+  "oaw:cache:v1:analytics:dashboard:90d"; do
+  npx wrangler kv key delete "$key" --local --binding KV --config "$WRANGLER_CONFIG" \
+    > /dev/null 2>&1 || true
+done
+
 echo "Test data setup complete!"

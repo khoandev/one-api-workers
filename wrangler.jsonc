@@ -32,6 +32,9 @@
       "database_id": "c3f1dd47-482e-4609-b22d-3e58d33024b6"
     }
   ],
+  "kv_namespaces": [
+    { "binding": "KV", "id": "8f4723bd91474fb29cbbff5089d9f466" }
+  ],
   "analytics_engine_datasets": [
     {
       "binding": "USAGE_ANALYTICS",
