@@ -1,6 +1,6 @@
 /**
  * Mock upstream server that simulates OpenAI / Azure OpenAI / OpenAI Responses APIs.
- * Usage: npx tsx tests/mock-upstream.ts
+ * Usage: bun tests/mock-upstream.ts
  * Listens on port 9999.
  */
 

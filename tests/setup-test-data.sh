@@ -6,7 +6,7 @@ MOCK="http://localhost:9999"
 API_URL="${API_URL:-http://localhost:8787}"
 WRANGLER_CONFIG="${WRANGLER_CONFIG:-wrangler.local.jsonc}"
 DB_NAME="${DB_NAME:-one-api}"
-DB_EXEC=(npx wrangler d1 execute "$DB_NAME" --local --config "$WRANGLER_CONFIG" --command)
+DB_EXEC=(bunx wrangler d1 execute "$DB_NAME" --local --config "$WRANGLER_CONFIG" --command)
 
 echo "Setting up test channels and tokens..."
 
@@ -61,7 +61,7 @@ for key in \
   "oaw:cache:v1:analytics:dashboard:7d" \
   "oaw:cache:v1:analytics:dashboard:30d" \
   "oaw:cache:v1:analytics:dashboard:90d"; do
-  npx wrangler kv key delete "$key" --local --binding KV --config "$WRANGLER_CONFIG" \
+  bunx wrangler kv key delete "$key" --local --binding KV --config "$WRANGLER_CONFIG" \
     > /dev/null 2>&1 || true
 done
 

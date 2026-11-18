@@ -9,6 +9,8 @@
     "dev:worker": "wrangler dev --config wrangler.local.jsonc --local --host localhost",
     "typecheck:worker": "tsc --noEmit",
     "typecheck": "bun run typecheck:worker && bun run --filter frontend typecheck",
+    "lint": "bun run --filter frontend lint",
+    "test": "bun test tests",
     "build": "bun run typecheck:worker && bun run --filter frontend build",
     "deploy": "bun run build && wrangler deploy --config wrangler.jsonc",
     "cf-typegen": "wrangler types --config wrangler.jsonc --include-env=false"
@@ -22,14 +24,14 @@
     "url": "https://github.com/Tokinx/one-api-workers/issues"
   },
   "dependencies": {
-    "chanfana": "^3.6.0",
-    "hono": "^4.13.18",
+    "chanfana": "^3.7.0",
+    "hono": "^4.13.19",
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "concurrently": "^9.2.5",
-    "typescript": "^6.0.3",
-    "wrangler": "^4.162.0"
+    "concurrently": "^10.0.7",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.164.0"
   },
-  "packageManager": "bun@1.4.0"
+  "packageManager": "bun@1.4.4"
 }

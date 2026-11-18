@@ -6,7 +6,7 @@ API="${API:-http://localhost:8787}"
 MOCK_API="${MOCK_API:-http://localhost:9999}"
 WRANGLER_CONFIG="${WRANGLER_CONFIG:-wrangler.local.jsonc}"
 DB_NAME="${DB_NAME:-one-api}"
-DB_EXEC=(npx wrangler d1 execute "$DB_NAME" --local --config "$WRANGLER_CONFIG" --command)
+DB_EXEC=(bunx wrangler d1 execute "$DB_NAME" --local --config "$WRANGLER_CONFIG" --command)
 PASS=0
 FAIL=0
 TOTAL=0
@@ -75,28 +75,28 @@ reset_mock_inspection() { curl -s -X POST "$MOCK_API/__reset" > /dev/null; }
 get_mock_inspection() { curl -sG "$MOCK_API/__inspect" --data-urlencode "key=$1"; }
 json_field() {
   local path="$1"
-  node -e "let raw=''; const path = process.argv[1].split('.'); process.stdin.on('data', (chunk) => raw += chunk); process.stdin.on('end', () => { const payload = JSON.parse(raw); let current = payload; for (const segment of path) { current = current?.[segment]; } process.stdout.write(current == null ? '' : String(current)); });" "$path"
+  bun -e "let raw=''; const path = process.argv[1].split('.'); process.stdin.on('data', (chunk) => raw += chunk); process.stdin.on('end', () => { const payload = JSON.parse(raw); let current = payload; for (const segment of path) { current = current?.[segment]; } process.stdout.write(current == null ? '' : String(current)); });" "$path"
 }
 ttl_seconds_until_iso() {
-  node -e "const expiresAt = Date.parse(process.argv[1]); process.stdout.write(Number.isFinite(expiresAt) ? String(Math.round((expiresAt - Date.now()) / 1000)) : '');" "$1"
+  bun -e "const expiresAt = Date.parse(process.argv[1]); process.stdout.write(Number.isFinite(expiresAt) ? String(Math.round((expiresAt - Date.now()) / 1000)) : '');" "$1"
 }
 set_system_config_disabled() {
   "${DB_EXEC[@]}" "INSERT OR REPLACE INTO settings (key, value) VALUES ('SYSTEM_CONFIG', '{\"displayDecimals\":6,\"adminSecurity\":{\"enabled\":false,\"telegramBotToken\":\"\",\"telegramChatId\":\"\",\"verifiedFingerprint\":\"\",\"verifiedAt\":null},\"apiDocs\":{\"enabled\":true}}')" > /dev/null 2>&1
 }
 set_system_config_with_telegram() {
   local bot_token="$1" chat_id="$2" fingerprint
-  fingerprint=$(node -e "const source = process.argv[1] + '::' + process.argv[2]; let hash = 2166136261; for (let index = 0; index < source.length; index += 1) { hash ^= source.charCodeAt(index); hash = Math.imul(hash, 16777619); } process.stdout.write(source ? 'tgv1-' + ((hash >>> 0).toString(16)) : '');" "$bot_token" "$chat_id")
+  fingerprint=$(bun -e "const source = process.argv[1] + '::' + process.argv[2]; let hash = 2166136261; for (let index = 0; index < source.length; index += 1) { hash ^= source.charCodeAt(index); hash = Math.imul(hash, 16777619); } process.stdout.write(source ? 'tgv1-' + ((hash >>> 0).toString(16)) : '');" "$bot_token" "$chat_id")
   "${DB_EXEC[@]}" "INSERT OR REPLACE INTO settings (key, value) VALUES ('SYSTEM_CONFIG', '{\"displayDecimals\":6,\"adminSecurity\":{\"enabled\":true,\"telegramBotToken\":\"$bot_token\",\"telegramChatId\":\"$chat_id\",\"verifiedFingerprint\":\"$fingerprint\",\"verifiedAt\":\"2026-04-14T00:00:00.000Z\"},\"apiDocs\":{\"enabled\":true}}')" > /dev/null 2>&1
 }
 seed_login_challenge() {
   local challenge_id="$1" code="$2" request_ip="$3" code_hash expires_at
-  code_hash=$(node -e "const crypto = require('node:crypto'); process.stdout.write(crypto.createHash('sha256').update(process.argv[1]).digest('hex'))" "$code")
-  expires_at=$(date -u -d "+5 minutes" +"%Y-%m-%dT%H:%M:%SZ")
+  code_hash=$(bun -e "const crypto = require('node:crypto'); process.stdout.write(crypto.createHash('sha256').update(process.argv[1]).digest('hex'))" "$code")
+  expires_at=$(bun -e "process.stdout.write(new Date(Date.now() + 5 * 60_000).toISOString().replace(/\.\d+Z$/, 'Z'))")
   "${DB_EXEC[@]}" "INSERT OR REPLACE INTO admin_login_challenge (id, code_hash, expires_at, attempts, max_attempts, request_ip, request_country, request_region, request_city, request_colo, request_timezone) VALUES ('$challenge_id', '$code_hash', '$expires_at', 0, 5, '$request_ip', '', '', '', '', 'Asia/Shanghai')" > /dev/null 2>&1
 }
 seed_blocked_rate_limit() {
   local category="$1" bucket_id="$2" attempts="$3" blocked_until="$4" now_iso
-  now_iso=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  now_iso=$(bun -e "process.stdout.write(new Date().toISOString().replace(/\.\d+Z$/, 'Z'))")
   "${DB_EXEC[@]}" "INSERT OR REPLACE INTO admin_rate_limit (bucket_key, category, bucket_id, window_started_at, attempts, blocked_until, last_event_at) VALUES ('$category:$bucket_id', '$category', '$bucket_id', '$now_iso', $attempts, '$blocked_until', '$now_iso')" > /dev/null 2>&1
 }
 
@@ -483,7 +483,7 @@ echo ""
 echo "--- Telegram notification throttle ---"
 
 THROTTLE_IP="203.0.113.71"
-THROTTLE_UNTIL=$(date -u -d "+15 minutes" +"%Y-%m-%dT%H:%M:%SZ")
+THROTTLE_UNTIL=$(bun -e "process.stdout.write(new Date(Date.now() + 15 * 60_000).toISOString().replace(/\.\d+Z$/, 'Z'))")
 set_system_config_with_telegram "dummy-bot-token" "123456"
 "${DB_EXEC[@]}" "DELETE FROM admin_rate_limit" > /dev/null 2>&1
 seed_blocked_rate_limit "admin-telegram-code:ip" "$THROTTLE_IP" 99 "$THROTTLE_UNTIL"

@@ -93,5 +93,5 @@ bash tests/run-e2e.sh
 
 - Scripts assume local ports (Worker `:8787`, mock upstream `:9999`) and `wrangler.local.jsonc`
 - `tests/setup-test-data.sh` writes and cleans local test data — do not run it against production
-- `tests/run-e2e.sh` uses GNU `date -d`; macOS users encountering `date: illegal option -- d` can install `coreutils` (`brew install coreutils` and alias `gdate`) or run inside a Linux environment
+- E2E scripts use Bun tooling only (`bunx wrangler`, `bun -e`); no Node or global Wrangler install is required
 - Doc-only or pure static frontend changes usually do not need a full E2E run
