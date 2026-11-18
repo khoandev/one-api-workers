@@ -16,11 +16,13 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from "@/components/ui/use-toast";
 import { cn } from "@/lib/utils";
+import { buildDuplicateChannelKey } from "@/lib/channel-duplicate";
 import {
   Plus,
   RefreshCw,
   Pencil,
   Trash2,
+  Copy,
   FileJson,
   FileText,
   Link as LinkIcon,
@@ -672,6 +674,19 @@ export function Channels({ createMode = false, editRoute = false }: { createMode
     },
   });
 
+  const duplicateMutation = useMutation({
+    mutationFn: async ({ key, config }: { key: string; config: ChannelConfig }) => {
+      return apiClient.saveChannel(key, config);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["channels"] });
+      addToast(t("channels.duplicateSuccess"), "success");
+    },
+    onError: (error: Error) => {
+      addToast(t("channels.duplicateFailed", { message: error.message }), "error");
+    },
+  });
+
   const toggleEnabledMutation = useMutation({
     mutationFn: async ({ channel, enabled }: { channel: Channel; enabled: boolean }) => {
       const config = normalizeChannelFormConfig(parseChannelValue(channel));
@@ -809,6 +824,17 @@ export function Channels({ createMode = false, editRoute = false }: { createMode
     if (confirm(t("channels.deleteConfirm"))) {
       deleteMutation.mutate(key);
     }
+  };
+
+  const handleDuplicate = (channel: Channel) => {
+    const sourceConfig = normalizeChannelFormConfig(parseChannelValue(channel));
+    const nextKey = buildDuplicateChannelKey(channel.key, (data ?? []).map((item) => item.key));
+    const nextConfig: ChannelConfig = {
+      ...sourceConfig,
+      name: t("channels.duplicateName", { name: sourceConfig.name || channel.key }),
+    };
+
+    duplicateMutation.mutate({ key: nextKey, config: nextConfig });
   };
 
   const handleToggleEnabled = (channel: Channel, enabled: boolean) => {
@@ -1250,6 +1276,14 @@ export function Channels({ createMode = false, editRoute = false }: { createMode
                                 {t("common.edit")}
                               </button>
                               <button
+                                className="w-full px-3 py-2 text-sm text-left hover:bg-muted flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-50"
+                                disabled={duplicateMutation.isPending}
+                                onClick={() => handleDuplicate(channel)}
+                              >
+                                <Copy className="h-4 w-4" />
+                                {t("channels.duplicateChannel")}
+                              </button>
+                              <button
                                 className="w-full px-3 py-2 text-sm text-left hover:bg-muted flex items-center gap-2 text-destructive"
                                 onClick={() => handleDelete(channel.key)}
                               >
@@ -1332,6 +1366,16 @@ export function Channels({ createMode = false, editRoute = false }: { createMode
                       <div className="flex items-center gap-1 flex-shrink-0">
                         <Button variant="ghost" className="w-8 h-8" size="sm" onClick={() => handleEdit(channel)}>
                           <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          className="w-8 h-8"
+                          size="sm"
+                          disabled={duplicateMutation.isPending}
+                          aria-label={t("channels.duplicateChannel")}
+                          onClick={() => handleDuplicate(channel)}
+                        >
+                          <Copy className="h-4 w-4" />
                         </Button>
                         <Button
                           variant="ghost"
